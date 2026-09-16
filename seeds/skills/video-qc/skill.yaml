@@ -1,0 +1,7 @@
+slug: video-qc
+name: Video QC
+version: 1.0.0
+description: "Verify video/audio deliverables before claiming they're done: container, codec, duration, resolution, audio presence, and spot checks."
+category: media
+permissions:
+  - shell

@@ -1,0 +1,38 @@
+# Local dev: one Postgres + the API.
+#   cp .env.example .env
+#   docker compose up --build -d
+#   docker compose exec api python -c "import psycopg"  # not needed; migrate instead:
+#   psql "$DATABASE_URL" -f migrations/001_init.sql   (or via the db container)
+#   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/skillexchange \
+#     python scripts/seed.py
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: skillexchange
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/skillexchange
+      AUTO_APPROVE: "true"   # local dev convenience; NEVER true in prod
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

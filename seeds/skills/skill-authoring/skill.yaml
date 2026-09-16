@@ -1,0 +1,6 @@
+slug: skill-authoring
+name: Skill Authoring
+version: 1.0.0
+description: "Write portable, high-quality SKILL.md files: frontmatter, structure, and instruction style that agents actually follow."
+category: meta
+permissions: []

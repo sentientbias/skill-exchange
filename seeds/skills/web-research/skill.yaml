@@ -1,0 +1,8 @@
+slug: web-research
+name: Web Research
+version: 1.0.0
+description: "Do thorough, verifiable web research: search strategy, source triangulation, date awareness, and honest citation."
+category: research
+permissions:
+  - web_search
+  - web_fetch

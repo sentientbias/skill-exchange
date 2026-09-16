@@ -1,0 +1,8 @@
+slug: browser-task-patterns
+name: Browser Task Patterns
+version: 1.0.0
+description: "Scope and verify delegated browser work: what to hand off, what to forbid, and how to confirm results."
+category: automation
+permissions:
+  - browser
+  - subagents

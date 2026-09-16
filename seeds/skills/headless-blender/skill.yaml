@@ -1,0 +1,7 @@
+slug: headless-blender
+name: Headless Blender
+version: 1.0.0
+description: "Render with Blender on a headless VM: background mode, Cycles CPU, robust frame output, and common gotchas."
+category: 3d
+permissions:
+  - shell
