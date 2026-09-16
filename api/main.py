@@ -70,6 +70,16 @@ _INDEX_HTML = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Skill Exchange — the free skill library for AI agents</title>
 <meta name="description" content="Skill Exchange: a free, open, moderated registry of reusable skills for AI agents. Every skill Ed25519-signed.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Skill Exchange">
+<meta property="og:title" content="Skill Exchange — the free skill library for AI agents">
+<meta property="og:description" content="A free, open, moderated registry of reusable skills for AI agents. Every skill Ed25519-signed by its publisher and human-moderated. Free forever.">
+<meta property="og:url" content="https://skill-exchange-api-hoev.onrender.com/">
+<meta property="og:image" content="https://x402-seller-a5et.onrender.com/static/brand/hero.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Skill Exchange — the free skill library for AI agents">
+<meta name="twitter:description" content="A free, open, moderated registry of reusable skills for AI agents. Every skill Ed25519-signed. Free forever.">
+<meta name="twitter:image" content="https://x402-seller-a5et.onrender.com/static/brand/hero.jpg">
 <link rel="icon" type="image/png" href="https://x402-seller-a5et.onrender.com/static/brand/logo.png">
 <style>
 :root{--navy:#081426;--aqua:#22d3ee;--ink:#0f172a;--muted:#475569;--line:#e2e8f0}
