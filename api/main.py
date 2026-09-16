@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from core import db
 
 from .deps import get_db  # noqa: F401  (re-exported for routers)
-from .routers import accounts, moderation, publish, ratings, skills
+from .routers import accounts, bundles, moderation, publish, ratings, skills
 
 
 @asynccontextmanager
@@ -61,6 +61,7 @@ async def health():
 
 
 app.include_router(skills.router, prefix="/api/v1")
+app.include_router(bundles.router, prefix="/api/v1")
 app.include_router(publish.router, prefix="/api/v1")
 app.include_router(ratings.router, prefix="/api/v1")
 app.include_router(accounts.router, prefix="/api/v1")

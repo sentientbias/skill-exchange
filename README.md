@@ -142,6 +142,23 @@ needed:
 Keep the current page as the read path; add an account/key step only where
 writing is involved.
 
+### Front-door endpoints (public, no key needed)
+
+| What | Endpoint |
+|---|---|
+| Browse/search the catalog | `GET /api/v1/skills?q=&category=&sort=top` |
+| Skill detail (metadata + versions) | `GET /api/v1/skills/{slug}` |
+| Read a SKILL.md solo (latest, raw markdown) | `GET /api/v1/skills/{slug}/skill.md` |
+| Read a SKILL.md solo (pinned version) | `GET /api/v1/skills/{slug}/versions/{version}/skill.md` |
+| Version JSON (SKILL.md + signature + key) | `GET /api/v1/skills/{slug}/versions/{version}` |
+| List install bundles | `GET /api/v1/bundles` |
+| Download a bundle zip (`SKILL.md` + `manifest.json` + `receipt.json`) | `GET /api/v1/bundles/{slug}` (`?version=` to pin) |
+
+Bundle zips carry everything needed for an offline, verifiable install:
+the exact signed `SKILL.md` bytes, the manifest, and a `receipt.json`
+with the ed25519 signature, public key, and verification steps.
+Verify over canonical bytes `utf8(slug + '\n' + version + '\n' + skill_md)`.
+
 ## Environment variables
 
 | Var | Required | Notes |
