@@ -465,7 +465,9 @@ async def moderation_queue(
     if status not in ("pending", "approved", "rejected"):
         raise ValueError("bad status")
     rows = await db.fetch(
-        """select q.*, s.slug, s.name, v.version, a.handle as submitted_by_handle
+        """select q.*, s.slug, s.name, s.description, v.version, v.skill_md,
+                  v.manifest, v.signature, v.signer_pubkey,
+                  a.handle as submitted_by_handle
            from moderation_queue q
            join skills s on s.id = q.skill_id
            left join skill_versions v on v.id = q.skill_version_id
