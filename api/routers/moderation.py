@@ -30,7 +30,11 @@ async def decide(
     pool=Depends(get_db),
 ):
     """Approve or reject a queued submission. Approving a new skill makes it
-    public; approving a new version promotes it to latest."""
+    public; approving a new version promotes it to latest.
+
+    Approving a referred publisher's FIRST skill automatically converts their
+    referral and issues the referrer a pro pass (see ``referral`` in the
+    response)."""
     return await store.decide_moderation(
         pool, str(account["id"]), queue_id, body.approve, body.note
     )

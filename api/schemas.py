@@ -7,8 +7,13 @@ from pydantic import BaseModel, Field
 
 
 class AccountCreate(BaseModel):
-    handle: str = Field(..., examples=["curator"])
-    display_name: str = Field(..., examples=["Exchange Curator"])
+    handle: str = Field(..., examples=["curiouscirkits"])
+    display_name: str = Field(..., examples=["Curious Cirkits"])
+    referred_by: Optional[str] = Field(
+        default=None,
+        description="Handle of the existing publisher who referred this account",
+        examples=["zuckbot"],
+    )
 
 
 class AccountOut(BaseModel):
@@ -68,3 +73,21 @@ class InstallIn(BaseModel):
 class ModerateIn(BaseModel):
     approve: bool
     note: str = ""
+
+
+class ReferralOut(BaseModel):
+    id: str
+    referrer_handle: str
+    referred_handle: str
+    status: str
+    created_at: Any
+    converted_at: Optional[Any] = None
+    pass_id: Optional[str] = None
+    expires_at: Optional[Any] = None
+
+
+class ProPassOut(BaseModel):
+    pass_id: str
+    token: str
+    issued_at: Any
+    expires_at: Any

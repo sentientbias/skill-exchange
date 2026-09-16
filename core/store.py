@@ -6,13 +6,15 @@ connection) explicitly -- no globals, easy to test.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg
 
-from . import auth, signing
+from . import auth, propass, signing
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,40}$")
 _HANDLE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,30}$")
@@ -67,16 +69,27 @@ async def create_account(
     display_name: str,
     *,
     is_moderator: bool = False,
+    referred_by: str | None = None,
 ) -> dict[str, Any]:
     """Create an account and mint its first API key.
 
     Returns the account plus ``api_key`` in PLAINTEXT -- show it to the user
     once and never store it.
+
+    ``referred_by`` (optional) is the handle of the existing publisher who
+    referred this account. It must name a real, different account; a pending
+    referral row is recorded and converts to a pro pass for the referrer when
+    this account's first skill is approved.
     """
     _check_handle(handle)
     name = (display_name or "").strip()
     if not name or len(name) > 80:
         raise ValueError("display_name must be 1-80 chars")
+    ref = (referred_by or "").strip().lower() or None
+    if ref:
+        _check_handle(ref)
+        if ref == handle:
+            raise ValueError("you cannot refer yourself")
     full_key, key_hash, key_prefix = auth.new_api_key()
     async with db.acquire() as conn:
         async with conn.transaction():
@@ -93,6 +106,31 @@ async def create_account(
                        values ($1, $2, $3, 'default')""",
                     row["id"], key_hash, key_prefix,
                 )
+            if ref:
+                referrer = await conn.fetchrow(
+                    "select id from accounts where handle = $1", ref
+                )
+                if referrer is None:
+                    raise ValueError(f"referrer handle '{ref}' does not exist")
+                try:
+                    await conn.execute(
+                        """insert into referrals
+                           (referrer_account_id, referred_account_id)
+                           values ($1, $2)""",
+                        referrer["id"], row["id"],
+                    )
+                    await conn.execute(
+                        "update accounts set referred_by_handle = $1 where id = $2",
+                        ref, row["id"],
+                    )
+                except asyncpg.UndefinedTableError:
+                    # migration 002 not applied yet: the account is still
+                    # created; the referral is dropped rather than failing
+                    # signup. Re-apply once migrated (or re-register).
+                    logging.warning(
+                        "referrals table missing (migration 002 pending); "
+                        "dropping referral %s -> %s", ref, handle,
+                    )
     account = _d(row)
     account["api_key"] = full_key
     return account
@@ -334,6 +372,10 @@ async def create_skill(
     out = _d(skill)
     out["status"] = "approved" if approved else "pending"
     out["version_id"] = str(ver["id"])
+    if approved:
+        # AUTO_APPROVE path: still convert referrals (normally this happens
+        # in moderation decide).
+        out["referral"] = await maybe_convert_referral(db, account_id)
     return out
 
 
@@ -522,4 +564,126 @@ async def decide_moderation(
                    where id = $1::uuid""",
                 queue_id, decision, reviewer_account_id, (note or "")[:2000],
             )
-    return {"id": queue_id, "decision": decision}
+    result = {
+        "id": queue_id,
+        "decision": decision,
+        "submitted_by": str(item["submitted_by"]),
+    }
+    if approve:
+        # Automatic conversion: a referred publisher's first approved skill
+        # earns their referrer a pro pass. Never blocks the approval itself.
+        result["referral"] = await maybe_convert_referral(
+            db, str(item["submitted_by"])
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# referrals & pro passes
+# ---------------------------------------------------------------------------
+
+async def maybe_convert_referral(
+    db: asyncpg.Pool, referred_account_id: str
+) -> dict[str, Any]:
+    """Convert a pending referral when the referred publisher's first skill is
+    approved, minting a pro pass for the referrer.
+
+    Idempotent: a referral converts at most once (status flips to 'converted'
+    inside the same transaction that issues the pass). Safe to call after any
+    skill approval; it no-ops when there is no pending referral or when the
+    account still has no approved skills.
+
+    If PROPASS_SIGNING_KEY is not configured, the referral stays pending (a
+    later approval or a manual re-run will convert it) -- approval itself is
+    never blocked by pass issuance.
+    """
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            try:
+                ref = await conn.fetchrow(
+                    """select r.*, a.handle as referrer_handle
+                       from referrals r
+                       join accounts a on a.id = r.referrer_account_id
+                       where r.referred_account_id = $1::uuid
+                         and r.status = 'pending'""",
+                    referred_account_id,
+                )
+            except asyncpg.UndefinedTableError:
+                # migration 002 not applied yet: no-op rather than breaking
+                # moderation.
+                logging.warning(
+                    "referrals table missing (migration 002 pending); "
+                    "skipping referral conversion")
+                return {"converted": False, "reason": "referral tables not migrated"}
+            if ref is None:
+                return {"converted": False, "reason": "no pending referral"}
+            approved_count = await conn.fetchval(
+                """select count(*) from skills
+                   where author_account_id = $1::uuid and status = 'approved'""",
+                referred_account_id,
+            )
+            if not approved_count:
+                return {"converted": False, "reason": "no approved skills yet"}
+            signing_key = os.environ.get("PROPASS_SIGNING_KEY", "").strip()
+            if not signing_key:
+                logging.warning(
+                    "PROPASS_SIGNING_KEY not configured; referral %s stays "
+                    "pending (approval unaffected)", ref["id"],
+                )
+                return {
+                    "converted": False,
+                    "reason": "pro-pass signing key not configured",
+                }
+            token, pass_id, exp_epoch = propass.mint_pass(
+                ref["referrer_handle"], signing_key
+            )
+            expires_at = datetime.fromtimestamp(exp_epoch, tz=timezone.utc)
+            await conn.execute(
+                """insert into pro_passes
+                   (account_id, referral_id, pass_id, token, expires_at)
+                   values ($1::uuid, $2::uuid, $3, $4, $5)""",
+                ref["referrer_account_id"], ref["id"], pass_id, token,
+                expires_at,
+            )
+            await conn.execute(
+                """update referrals set status = 'converted', converted_at = now()
+                   where id = $1::uuid""",
+                ref["id"],
+            )
+            return {
+                "converted": True,
+                "referrer": ref["referrer_handle"],
+                "pass_id": pass_id,
+            }
+
+
+async def list_referrals(db: asyncpg.Pool) -> list[dict[str, Any]]:
+    """Operator view: every referral with referrer/referred handles,
+    conversion state, and the issued pass (if any)."""
+    rows = await db.fetch(
+        """select r.id, r.status, r.created_at, r.converted_at,
+                  fr.handle as referrer_handle,
+                  fa.handle as referred_handle,
+                  p.pass_id, p.expires_at
+           from referrals r
+           join accounts fr on fr.id = r.referrer_account_id
+           join accounts fa on fa.id = r.referred_account_id
+           left join pro_passes p on p.referral_id = r.id
+           order by r.created_at desc"""
+    )
+    return [_d(r) for r in rows]
+
+
+async def list_pro_passes(
+    db: asyncpg.Pool, account_id: str
+) -> list[dict[str, Any]]:
+    """Pro passes earned by one account (the referrer retrieves their own
+    tokens here)."""
+    rows = await db.fetch(
+        """select pass_id, token, issued_at, expires_at
+           from pro_passes
+           where account_id = $1::uuid
+           order by issued_at desc""",
+        account_id,
+    )
+    return [_d(r) for r in rows]

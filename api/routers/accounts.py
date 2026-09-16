@@ -3,8 +3,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from api.deps import current_account, get_db
-from api.schemas import AccountCreate, AccountOut, KeyCreate, KeyOut
+from api.deps import current_account, get_db, moderator
+from api.schemas import (
+    AccountCreate,
+    AccountOut,
+    KeyCreate,
+    KeyOut,
+    ProPassOut,
+    ReferralOut,
+)
 from core import store
 
 router = APIRouter(tags=["accounts"])
@@ -14,9 +21,13 @@ router = APIRouter(tags=["accounts"])
              status_code=status.HTTP_201_CREATED)
 async def create_account(body: AccountCreate, pool=Depends(get_db)):
     """Register a publisher account. The response includes the API key in
-    PLAINTEXT -- save it now, it is never shown again."""
+    PLAINTEXT -- save it now, it is never shown again.
+
+    Pass ``referred_by`` with the handle of the publisher who referred you:
+    when your first skill is approved, they earn a free Exchange Pro pass.
+    """
     account = await store.create_account(
-        pool, body.handle, body.display_name)
+        pool, body.handle, body.display_name, referred_by=body.referred_by)
     return AccountOut(
         id=str(account["id"]),
         handle=account["handle"],
@@ -36,6 +47,32 @@ async def me(account=Depends(current_account)):
         "is_moderator": account["is_moderator"],
         "created_at": account["created_at"],
     }
+
+
+@router.get("/accounts/me/pro-passes", response_model=list[ProPassOut])
+async def my_pro_passes(account=Depends(current_account), pool=Depends(get_db)):
+    """Pro passes this account has earned via referrals. Each ``token`` goes
+    in the ``X-Pro-Pass`` header for free Exchange Pro (x402 seller) access.
+    Treat tokens like credentials: whoever holds one rides free as you."""
+    passes = await store.list_pro_passes(pool, str(account["id"]))
+    return [
+        ProPassOut(
+            pass_id=p["pass_id"],
+            token=p["token"],
+            issued_at=p["issued_at"],
+            expires_at=p["expires_at"],
+        )
+        for p in passes
+    ]
+
+
+@router.get("/accounts/referrals", response_model=list[ReferralOut])
+async def referrals_overview(
+    account=Depends(moderator), pool=Depends(get_db)
+):
+    """Operator view: every referral with referrer/referred handles and
+    conversion state (moderators only)."""
+    return await store.list_referrals(pool)
 
 
 @router.post("/accounts/me/keys", response_model=KeyOut,
