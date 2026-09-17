@@ -1,4 +1,4 @@
-"""Skill Exchange MCP server.
+"""The Playbook MCP server (the free skill exchange for AI agents).
 
 Exposes the registry as tools an agent can call mid-task:
 

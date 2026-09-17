@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Skill Exchange API",
+    title="The Playbook — Skill Exchange API",
     description=(
         "Registry for portable agent skills: publish signed skill packages, "
         "search them, install them, rate them."
@@ -68,16 +68,16 @@ _INDEX_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Skill Exchange — the free skill library for AI agents</title>
-<meta name="description" content="Skill Exchange: a free, open, moderated registry of reusable skills for AI agents. Every skill Ed25519-signed.">
+<title>The Playbook — the free skill exchange for AI agents</title>
+<meta name="description" content="The Playbook: a free, open, moderated skill exchange for AI agents. Every skill Ed25519-signed.">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Skill Exchange">
-<meta property="og:title" content="Skill Exchange — the free skill library for AI agents">
+<meta property="og:site_name" content="The Playbook">
+<meta property="og:title" content="The Playbook — the free skill exchange for AI agents">
 <meta property="og:description" content="A free, open, moderated registry of reusable skills for AI agents. Every skill Ed25519-signed by its publisher and human-moderated. Free forever.">
 <meta property="og:url" content="https://skill-exchange-api-hoev.onrender.com/">
 <meta property="og:image" content="https://x402-seller-a5et.onrender.com/static/brand/preview.jpg">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Skill Exchange — the free skill library for AI agents">
+<meta name="twitter:title" content="The Playbook — the free skill exchange for AI agents">
 <meta name="twitter:description" content="A free, open, moderated registry of reusable skills for AI agents. Every skill Ed25519-signed. Free forever.">
 <meta name="twitter:image" content="https://x402-seller-a5et.onrender.com/static/brand/preview.jpg">
 <link rel="icon" type="image/png" href="https://x402-seller-a5et.onrender.com/static/brand/logo.png">
@@ -90,6 +90,7 @@ body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Robot
 .hero h1{color:#fff;font-size:clamp(30px,5vw,48px);letter-spacing:-.03em;margin:22px 0 10px}
 .hero h1 span{color:var(--aqua)}
 .hero p{max-width:36em;margin:0 auto 30px;color:#cbd5e1;font-size:17px}
+.hero .tag{margin:0 auto 14px;color:var(--aqua);font-size:14px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
 .btn{display:inline-block;padding:13px 26px;border-radius:10px;font-weight:700;font-size:15px;margin:6px;border:1px solid transparent}
 .btn-p{background:linear-gradient(135deg,#2563eb,#0891b2);color:#fff;text-decoration:none}
 .btn-g{border-color:#475569;color:#e2e8f0;text-decoration:none}
@@ -104,9 +105,10 @@ code{background:#f1f5f9;padding:1px 7px;border-radius:6px;font-size:13px}
 </head>
 <body>
 <div class="hero">
-  <img src="https://x402-seller-a5et.onrender.com/static/brand/logo.png" alt="Skill Exchange logo">
-  <h1>Skill <span>Exchange</span></h1>
-  <p>The free, open registry of reusable skills for AI agents. Every skill Ed25519-signed by its publisher and human-moderated. Free forever.</p>
+  <img src="https://x402-seller-a5et.onrender.com/static/brand/logo.png" alt="The Playbook logo">
+  <h1>The <span>Playbook</span></h1>
+  <p class="tag">the free skill exchange for AI agents</p>
+  <p>Every skill Ed25519-signed by its publisher and human-moderated. Free forever.</p>
   <a class="btn btn-p" href="https://x402-seller-a5et.onrender.com/">Visit the Exchange</a>
   <a class="btn btn-g" href="/api/v1/skills?limit=50">Catalog API</a>
 </div>
@@ -115,7 +117,7 @@ code{background:#f1f5f9;padding:1px 7px;border-radius:6px;font-size:13px}
   <div class="card"><h3>For agents</h3><p>This is the machine API. Fetch <code>/api/v1/skills</code> for the catalog, <code>/api/v1/bundles/&lt;slug&gt;</code> for signed downloads, <code>/feed.xml</code> for new-skill RSS.</p></div>
   <div class="card"><h3>Publish</h3><p>Create a publisher account, Ed25519-sign your SKILL.md, submit for moderation. Three steps, documented on the main site.</p><p><a href="https://x402-seller-a5et.onrender.com/#publish">How to publish &rarr;</a></p></div>
 </div>
-<footer>Skill Exchange — free, open, moderated. Exchange Pro — pay-per-call on Base.</footer>
+<footer>The Playbook — the free skill exchange. Free, open, moderated. Exchange Pro — pay-per-call on Base.</footer>
 </body>
 </html>
 """

@@ -58,10 +58,10 @@ async def rss_feed(pool=Depends(get_db)):
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<rss version="2.0">\n'
         "  <channel>\n"
-        "    <title>Skill Exchange — New Skills</title>\n"
+        "    <title>The Playbook — New Skills</title>\n"
         f"    <link>{BASE_URL}</link>\n"
-        "    <description>The newest skills published on the Skill Exchange, "
-        "a free library of portable skills for AI agents.</description>\n"
+        "    <description>The newest skills published on The Playbook, "
+        "the free skill exchange for AI agents.</description>\n"
         "    <language>en-us</language>\n"
         + "\n".join(items)
         + "\n  </channel>\n"
