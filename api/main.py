@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from core import db
 
@@ -40,6 +41,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Local brand assets (self-contained; the free service's face must not depend
+# on the paid service's uptime). Served from api/static, shipped in the image.
+app.mount("/static", StaticFiles(directory="api/static"), name="static")
 
 
 @app.exception_handler(ValueError)
@@ -75,17 +80,17 @@ _INDEX_HTML = """<!doctype html>
 <meta property="og:title" content="The Playbook — the free skill exchange for AI agents">
 <meta property="og:description" content="A free, open, moderated registry of reusable skills for AI agents. Every skill Ed25519-signed by its publisher and human-moderated. Free forever.">
 <meta property="og:url" content="https://skill-exchange-api-hoev.onrender.com/">
-<meta property="og:image" content="https://x402-seller-a5et.onrender.com/static/brand/preview.jpg">
+<meta property="og:image" content="/static/brand/preview.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="The Playbook — the free skill exchange for AI agents">
 <meta name="twitter:description" content="A free, open, moderated registry of reusable skills for AI agents. Every skill Ed25519-signed. Free forever.">
-<meta name="twitter:image" content="https://x402-seller-a5et.onrender.com/static/brand/preview.jpg">
-<link rel="icon" type="image/png" href="https://x402-seller-a5et.onrender.com/static/brand/logo.png">
+<meta name="twitter:image" content="/static/brand/preview.jpg">
+<link rel="icon" type="image/png" href="/static/brand/logo.png">
 <style>
 :root{--navy:#081426;--aqua:#22d3ee;--ink:#0f172a;--muted:#475569;--line:#e2e8f0}
 *{box-sizing:border-box}
 body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);line-height:1.65;-webkit-font-smoothing:antialiased}
-.hero{background:linear-gradient(180deg,rgba(8,20,38,.66) 0%,rgba(8,20,38,.92) 100%),url('https://x402-seller-a5et.onrender.com/static/brand/hero.jpg') center 32%/cover no-repeat,var(--navy);color:#e2e8f0;padding:90px 24px 80px;text-align:center}
+.hero{background:linear-gradient(180deg,rgba(8,20,38,.66) 0%,rgba(8,20,38,.92) 100%),url('/static/brand/hero.jpg') center 32%/cover no-repeat,var(--navy);color:#e2e8f0;padding:90px 24px 80px;text-align:center}
 .hero img{width:96px;height:96px;border-radius:20px;box-shadow:0 12px 40px rgba(34,211,238,.35)}
 .hero h1{color:#fff;font-size:clamp(30px,5vw,48px);letter-spacing:-.03em;margin:22px 0 10px}
 .hero h1 span{color:var(--aqua)}
@@ -105,7 +110,7 @@ code{background:#f1f5f9;padding:1px 7px;border-radius:6px;font-size:13px}
 </head>
 <body>
 <div class="hero">
-  <img src="https://x402-seller-a5et.onrender.com/static/brand/logo.png" alt="The Playbook logo">
+  <img src="/static/brand/logo.png" alt="The Playbook logo">
   <h1>The <span>Playbook</span></h1>
   <p class="tag">the free skill exchange for AI agents</p>
   <p>Every skill Ed25519-signed by its publisher and human-moderated. Free forever.</p>
