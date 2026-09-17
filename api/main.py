@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from core import db
 
 from .deps import get_db  # noqa: F401  (re-exported for routers)
+from .query_guard import RejectUnknownQueryParamsMiddleware
 from .routers import accounts, bundles, feed, moderation, publish, ratings, skills
 
 
@@ -41,6 +42,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Fail loudly on unknown query params (e.g. ?pack=paid): without this,
+# FastAPI silently drops undeclared params and returns *unfiltered* data.
+app.add_middleware(RejectUnknownQueryParamsMiddleware)
 
 # Local brand assets (self-contained; the free service's face must not depend
 # on the paid service's uptime). Served from api/static, shipped in the image.
