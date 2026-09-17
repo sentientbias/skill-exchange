@@ -44,12 +44,22 @@ def _receipt(slug: str, ver: dict) -> dict:
 
 
 def _build_zip(slug: str, ver: dict) -> bytes:
+    # asyncpg returns jsonb columns as str unless a codec is registered, so the
+    # stored manifest may come back as a JSON-encoded string -- normalize to a
+    # dict so manifest.json in the bundle is an object, not a double-encoded
+    # string (a programmatic json.loads() must get a dict).
+    manifest = ver.get("manifest") or {}
+    if isinstance(manifest, str):
+        try:
+            manifest = json.loads(manifest)
+        except ValueError:
+            manifest = {}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{slug}/SKILL.md", ver["skill_md"])
         zf.writestr(
             f"{slug}/manifest.json",
-            json.dumps(ver.get("manifest") or {}, indent=2) + "\n",
+            json.dumps(manifest, indent=2) + "\n",
         )
         zf.writestr(
             f"{slug}/receipt.json", json.dumps(_receipt(slug, ver), indent=2) + "\n"
