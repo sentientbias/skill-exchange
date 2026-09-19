@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from core import db
+from core.build_info import build_info
 
 from .deps import get_db  # noqa: F401  (re-exported for routers)
 from .query_guard import RejectUnknownQueryParamsMiddleware
@@ -67,7 +68,14 @@ from .deps import current_account, get_db, moderator  # noqa: F401,E402
 
 @app.get("/api/v1/health", tags=["meta"])
 async def health():
-    return {"ok": True, "service": "skill-exchange", "version": "1.0.0"}
+    # `build` is additive: existing fields are untouched so old consumers
+    # keep working. Lets operators confirm which commit is actually live.
+    return {
+        "ok": True,
+        "service": "skill-exchange",
+        "version": "1.0.0",
+        "build": build_info(),
+    }
 
 
 # ---------------------------------------------------------------------------
