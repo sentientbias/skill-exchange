@@ -34,6 +34,13 @@ the human review process.
   shown once at creation. Keys are revocable and per-device.
 - **One rating per account per skill**, upserted on re-rate (limits casual
   ballot-stuffing; see residual risks).
+- **Signing-key continuity enforced server-side** (`store.create_version`).
+  A new version must be signed with a key the skill has already used (compared
+  case-insensitively on the hex); a silent key swap by a compromised account
+  is rejected with a 400. Only a moderator may submit a version under a new
+  key, which is the documented out-of-band rotation path. This closes the gap
+  where a stolen API key (threat 6) could swap the signing identity and the
+  only backstop was a human comparing hex strings.
 - **Install events** are logged separately from ratings, so "downloads" can't
   be faked through the rating endpoint.
 
@@ -60,6 +67,9 @@ it goes public. The reviewer checks:
 
 1. **Signature valid** — the API already enforced this, but confirm the
    public key matches the author's previously published key (key continuity).
+   Since 2026-09-19 the server enforces this automatically and rejects silent
+   key swaps; the human check remains as belt-and-braces, and only a moderator
+   can rotate a lost key.
 2. **No private data** — no real names, emails, credentials, API keys, or
    machine-specific secrets in the content.
 3. **No malicious instructions** — read the SKILL.md. Look for: exfiltration
@@ -94,8 +104,11 @@ a note explaining what to fix; resubmission is always allowed.
   install-time skepticism), not any single layer.
 - **Rating Sybils**: one-account-one-rating slows but doesn't stop fake
   accounts. Future: weight ratings by verified installs.
-- **No key rotation / revocation for signing keys yet**: if a publisher's
-  private key is compromised, a moderator must intervene manually.
+- **No self-service key rotation / revocation for signing keys yet**: if a
+  publisher's private key is compromised, a moderator must rotate it through
+  the out-of-band flow. Since 2026-09-19 the server *blocks* unilateral key
+  changes, so a compromised key can no longer be silently swapped by the
+  attacker — but revocation of a known-bad key still needs moderator action.
 - **The registry operator is trusted**: a malicious operator could serve
   different content than what was signed. Clients verifying signatures
   against the author's *known* public key (not just the one the server

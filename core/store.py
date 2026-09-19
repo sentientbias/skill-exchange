@@ -391,7 +391,9 @@ async def create_version(
     public_key: str,
 ) -> dict[str, Any]:
     """Publish a new version of an existing skill. Only the original author
-    (or a moderator) may do this. Verified + queued like a new skill."""
+    (or a moderator) may do this. Verified + queued like a new skill. The
+    signing key must match a key the skill has used before (key continuity),
+    unless the submitter is a moderator rotating a lost key."""
     _check_slug(slug)
     _check_version(version)
     skill_md = skill_md or ""
@@ -407,11 +409,33 @@ async def create_version(
             )
             if skill is None:
                 raise ValueError(f"no such skill '{slug}'")
-            author = await conn.fetchval(
+            is_moderator = await conn.fetchval(
                 "select is_moderator from accounts where id = $1::uuid", account_id
             )
-            if str(skill["author_account_id"]) != str(account_id) and not author:
+            if str(skill["author_account_id"]) != str(account_id) and not is_moderator:
                 raise ValueError("only the original author can publish new versions")
+            # Signing-key continuity: a new version must be signed with a key
+            # the skill has used before. Without this, a stolen API key lets an
+            # attacker silently swap the signing identity -- the signature still
+            # verifies (against the attacker's own key) and only a human
+            # comparing hex strings would notice. Moderators may still rotate a
+            # lost key through the documented out-of-band flow.
+            prior = await conn.fetch(
+                "select distinct signer_pubkey from skill_versions"
+                " where skill_id = $1",
+                skill["id"],
+            )
+            known_keys = {
+                str(row["signer_pubkey"]).strip().lower() for row in prior
+            }
+            if (known_keys
+                    and public_key.strip().lower() not in known_keys
+                    and not is_moderator):
+                raise ValueError(
+                    "signing key changed: new versions must be signed with the "
+                    "same key as previous versions. If you lost your key, ask "
+                    "a moderator to rotate it for you."
+                )
             try:
                 ver = await conn.fetchrow(
                     """insert into skill_versions
