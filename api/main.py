@@ -19,6 +19,7 @@ from api.front_door import front_door_html
 
 from .deps import get_db  # noqa: F401  (re-exported for routers)
 from .query_guard import RejectUnknownQueryParamsMiddleware
+from .request_size_guard import RequestSizeGuardMiddleware
 from .routers import accounts, bundles, feed, moderation, publish, ratings, skills
 
 import logging
@@ -53,6 +54,12 @@ app.add_middleware(
 # Fail loudly on unknown query params (e.g. ?pack=paid): without this,
 # FastAPI silently drops undeclared params and returns *unfiltered* data.
 app.add_middleware(RejectUnknownQueryParamsMiddleware)
+
+# Reject oversized request bodies (413) before FastAPI parses them into
+# memory: several write endpoints are anonymous or cheaply reachable, and
+# the bodies were unbounded. The cap is generous (1 MiB) next to the largest
+# legit payload (~250 KB for a max-size SKILL.md publish).
+app.add_middleware(RequestSizeGuardMiddleware)
 
 # Local brand assets (self-contained; the free service's face must not depend
 # on the paid service's uptime). Served from api/static, shipped in the image.

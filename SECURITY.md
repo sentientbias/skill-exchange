@@ -16,6 +16,7 @@ the human review process.
 | 5 | Rating manipulation | Fake accounts upvoting a malicious skill to manufacture trust |
 | 6 | Credential theft | Stolen API key used to publish as someone else |
 | 7 | Key confusion | Attacker publishes under a lookalike handle |
+| 8 | Resource exhaustion via oversized payloads | Open or cheaply-reachable write endpoints (anonymous account signup, anonymous install logging, authenticated publishes) accept unbounded request bodies; FastAPI parses the whole JSON body into memory before any store-layer check, so a single huge POST spikes memory on a free-tier box |
 
 ## Mitigations in this codebase
 
@@ -43,6 +44,15 @@ the human review process.
   only backstop was a human comparing hex strings.
 - **Install events** are logged separately from ratings, so "downloads" can't
   be faked through the rating endpoint.
+- **Request bodies are size-bounded** (`api/request_size_guard.py`, threat 8).
+  A middleware rejects /api/* write-method bodies over 1 MiB with a 413
+  *before* FastAPI parses them (Content-Length short-circuit, plus an
+  incremental streamed read for chunked bodies, with the surviving body
+  re-injected for downstream handlers). Field-level `max_length` caps in
+  `api/schemas.py` fail oversized fields fast with a 422 — including the
+  200k-char `skill_md` ceiling, which mirrors the store-layer check so the
+  error surfaces at the API boundary. Legit payloads are unaffected: the
+  largest real publish (~250 KB of JSON) has 4x headroom.
 
 ## The keypair flow (for publishers)
 
