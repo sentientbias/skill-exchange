@@ -6,6 +6,7 @@ connection) explicitly -- no globals, easy to test.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -54,6 +55,42 @@ def _check_category(category: str) -> None:
 def _check_sort(sort: str) -> None:
     if sort not in _SORTS:
         raise ValueError(f"sort must be one of {sorted(_SORTS)}")
+
+
+def _signature_diagnostic(slug: str, version: str, skill_md: str) -> str:
+    """Self-diagnosing detail for a failed publish signature check.
+
+    The old message ("signature verification failed -- check key and content")
+    was a dead end for autonomous publishers: the most common failure modes
+    are invisible byte drift (trailing whitespace, CRLF line endings, SQL
+    paste mangling -- the 2026-09-16 seed corruption invalidated 5 signatures
+    exactly this way, as did a single-word edit to one skill) or signing
+    with the wrong keypair. This gives the publisher a way to localize the
+    fault in one round trip instead of guessing.
+
+    Everything returned is derived from the publisher's own submission, so
+    nothing secret leaks: canonical_sha256 is a hash of bytes the publisher
+    already knows. The publisher recomputes
+    sha256(utf8(slug + '\\n' + version + '\\n' + skill_md)) locally:
+      - hashes MATCH => canonicalization agrees; the signature itself is bad
+        (wrong private key, or re-sign after any byte edit).
+      - hashes DIFFER => the server built different canonical bytes than the
+        client signed (whitespace/line-ending drift, or a slug/version
+        mismatch between the signed payload and the request fields).
+    """
+    digest = hashlib.sha256(
+        signing.canonical_bytes(slug, version, skill_md)).hexdigest()
+    return (
+        "signature verification failed -- check key and content. "
+        f"canonical_sha256={digest} "
+        "canonical_format=\"utf8(slug + '\\n' + version + '\\n' + skill_md)\". "
+        "Recompute sha256 over your canonical bytes locally: if your hash "
+        "MATCHES, your bytes are right and the signature is bad (wrong "
+        "private key, or sign again after any byte edit). If it DIFFERS, "
+        "your bytes drifted before signing (trailing whitespace, CRLF line "
+        f"endings, or a slug/version mismatch) -- server saw skill_md of "
+        f"{len(skill_md)} chars."
+    )
 
 
 def _auto_approve() -> bool:
@@ -366,7 +403,7 @@ async def create_skill(
     if len(skill_md) < 50 or len(skill_md) > 200_000:
         raise ValueError("skill_md must be 50-200000 chars")
     if not signing.verify_package(slug, version, skill_md, signature, public_key):
-        raise ValueError("signature verification failed -- check key and content")
+        raise ValueError(_signature_diagnostic(slug, version, skill_md))
     approved = _auto_approve()
     async with db.acquire() as conn:
         async with conn.transaction():
@@ -430,7 +467,7 @@ async def create_version(
     if len(skill_md) < 50 or len(skill_md) > 200_000:
         raise ValueError("skill_md must be 50-200000 chars")
     if not signing.verify_package(slug, version, skill_md, signature, public_key):
-        raise ValueError("signature verification failed -- check key and content")
+        raise ValueError(_signature_diagnostic(slug, version, skill_md))
     approved = _auto_approve()
     async with db.acquire() as conn:
         async with conn.transaction():
