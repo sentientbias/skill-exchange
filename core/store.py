@@ -51,6 +51,11 @@ def _check_category(category: str) -> None:
         raise ValueError(f"category must be one of {sorted(_CATEGORIES)}")
 
 
+def _check_sort(sort: str) -> None:
+    if sort not in _SORTS:
+        raise ValueError(f"sort must be one of {sorted(_SORTS)}")
+
+
 def _auto_approve() -> bool:
     return os.environ.get("AUTO_APPROVE", "false").lower() in ("1", "true", "yes")
 
@@ -227,7 +232,8 @@ async def list_skills(
     include_pending: bool = False,
 ) -> list[dict[str, Any]]:
     """List skills. Public callers see only approved skills."""
-    order = _SORTS.get(sort, _SORTS["newest"])
+    _check_sort(sort)
+    order = _SORTS[sort]
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
     status_filter = "" if include_pending else "and s.status = 'approved'"
