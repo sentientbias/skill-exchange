@@ -242,6 +242,28 @@ async def list_skills(
     return [_d(r) for r in rows]
 
 
+async def catalog_stats(db: asyncpg.Pool) -> dict[str, int]:
+    """Front-door numbers: approved skills and total recorded installs.
+
+    Kept as one cheap aggregate query; the front door calls it once per
+    page view and degrades silently if the DB is unreachable.
+    """
+    row = await db.fetchrow(
+        """select count(*)::int as skill_count,
+                  coalesce(sum(dl.total_downloads), 0)::int as total_downloads
+           from skills s
+           left join (select skill_id, sum(downloads) as total_downloads
+                      from skill_versions group by skill_id) dl
+             on dl.skill_id = s.id
+           where s.status = 'approved'"""
+    )
+    d = _d(row) or {}
+    return {
+        "skill_count": int(d.get("skill_count") or 0),
+        "total_downloads": int(d.get("total_downloads") or 0),
+    }
+
+
 async def get_skill(
     db: asyncpg.Pool, slug: str, *, include_pending: bool = False
 ) -> dict[str, Any] | None:
