@@ -54,7 +54,10 @@ def test_live_mode_renders_strips_and_stats():
     assert "New in the library" in page
     assert "Most installed" in page
     assert "Regex Mastery" in page
-    assert "/api/v1/skills/regex-mastery/skill.md" in page
+    # card name links to the per-skill detail page (the registry package-page
+    # slot), not a raw SKILL.md download
+    assert "/skills/regex-mastery" in page
+    assert 'href="/api/v1/skills/regex-mastery/skill.md"' not in page
     assert "<b>50</b> skills" in page
     assert "<b>31</b> installs" in page
     assert "Ed25519-signed" in page

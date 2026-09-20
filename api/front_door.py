@@ -40,7 +40,7 @@ def _skill_card(s: dict) -> str:
     return (
         f'<div class="skill">'
         f'<div class="skill-top"><a class="skill-name" '
-        f'href="/api/v1/skills/{slug}/skill.md">{name}</a>'
+        f'href="/skills/{slug}">{name}</a>'
         + (f'<span class="ver">v{version}</span>' if version else "")
         + "</div>"
         + (f'<div class="cat">{category}</div>' if category else "")

@@ -16,6 +16,7 @@ from core import db, store
 from core.build_info import build_info
 
 from api.front_door import front_door_html
+from api.skill_page import skill_not_found_html, skill_page_html
 
 from .deps import get_db  # noqa: F401  (re-exported for routers)
 from .query_guard import RejectUnknownQueryParamsMiddleware
@@ -112,6 +113,25 @@ async def index(pool=Depends(get_db)):
                     exc_info=True)
         latest = top = stats = None
     return HTMLResponse(front_door_html(latest, top, stats))
+
+
+@app.get("/skills/{slug}", include_in_schema=False)
+async def skill_detail(slug: str, pool=Depends(get_db)):
+    """Per-skill detail page: install command, versions, signature, ratings.
+
+    Human-readable counterpart to GET /api/v1/skills/{slug} (the npm/PyPI
+    package-page slot). Only approved skills get pages; unknown slugs,
+    invalid slugs, and DB outages all render the 404 page -- this route
+    must never 500, same as the front door.
+    """
+    try:
+        skill = await store.get_skill(pool, slug)
+    except Exception:
+        log.warning("skill page: lookup failed for %r", slug, exc_info=True)
+        skill = None
+    if skill is None:
+        return HTMLResponse(skill_not_found_html(slug), status_code=404)
+    return HTMLResponse(skill_page_html(skill))
 
 
 app.include_router(feed.router)
