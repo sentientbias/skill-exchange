@@ -201,11 +201,13 @@ async def revoke_api_key(
 _LIST_SELECT = """
 select s.id, s.slug, s.name, s.description, s.category, s.status,
        s.created_at, s.updated_at,
+       a.handle as publisher,
        lv.version as latest_version,
        coalesce(rt.avg_stars, 0)::float as avg_stars,
        coalesce(rt.rating_count, 0)::int as rating_count,
        coalesce(dl.total_downloads, 0)::int as downloads
 from skills s
+left join accounts a on a.id = s.author_account_id
 left join skill_versions lv on lv.id = s.latest_version_id
 left join (select skill_id, avg(stars) as avg_stars, count(*) as rating_count
            from ratings group by skill_id) rt on rt.skill_id = s.id
