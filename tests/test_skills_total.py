@@ -13,6 +13,7 @@ Run:  pytest tests/test_skills_total.py
 import asyncio
 import os
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -90,10 +91,12 @@ def test_count_and_list_params_agree_on_filters():
     run(store.list_skills(db_list, **filters))
     run(store.count_skills(db_count, **filters))
     # count params are the filter params (q, category, since); the list
-    # appends limit/offset after them.
+    # appends limit/offset after them. since is coerced to a tz-aware
+    # datetime for asyncpg (raw strings 500 on real Postgres).
     count_params = db_count.queries[0][1]
     list_params = db_list.queries[0][1]
-    assert count_params == ("regex", "devtools", "2026-09-01T00:00:00Z")
+    assert count_params[:2] == ("regex", "devtools")
+    assert count_params[2] == datetime(2026, 9, 1, tzinfo=timezone.utc)
     assert list_params[:3] == count_params
 
 
@@ -127,7 +130,7 @@ def test_list_route_passes_filters_to_count():
     count_query, count_params = db.queries[1]  # second call is the count
     assert "count(*)::int as total" in count_query
     assert "video" in count_params and "media" in count_params
-    assert "2026-09-20T00:00:00Z" in count_params
+    assert datetime(2026, 9, 20, tzinfo=timezone.utc) in count_params
 
 
 # --- public MCP server passthrough ---------------------------------------

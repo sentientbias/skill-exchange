@@ -259,21 +259,40 @@ left join (select skill_id, sum(downloads) as total_downloads
 """
 
 
+def _coerce_since(since: str | datetime) -> datetime:
+    """Normalize the `since` filter to a tz-aware datetime for asyncpg.
+
+    asyncpg rejects raw strings for timestamptz-typed params (it demands a
+    datetime instance) -- passing the validated ISO string straight through
+    500s on real Postgres. This bit us live on 2026-09-21: validation passed
+    in Python, then $3::timestamptz blew up with a DataError. Naive values
+    (date-only input) are assumed UTC.
+    """
+    if isinstance(since, datetime):
+        dt = since
+    else:
+        dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _list_filters(
-    q: str, category: str, since: str, *, include_pending: bool
+    q: str, category: str, since: str | datetime, *, include_pending: bool
 ) -> tuple[str, list]:
     """Shared WHERE-clause builder for list_skills() and count_skills().
 
     Keeps the filter logic in exactly one place so the page and the total
     can never disagree. params[0:2] are q and category; since, if present,
-    is appended last. Callers append their own trailing params (limit,
-    offset) and number them from len(params)+1.
+    is appended last (coerced to a tz-aware datetime -- see _coerce_since).
+    Callers append their own trailing params (limit, offset) and number
+    them from len(params)+1.
     """
     status_filter = "" if include_pending else "and s.status = 'approved' "
     params: list = [q or "", category or ""]
     since_filter = ""
     if since:
-        params.append(since)
+        params.append(_coerce_since(since))
         since_filter = f"and s.updated_at > ${len(params)}::timestamptz "
     where = (
         "where ($1 = '' or s.slug ilike '%' || $1 || '%' "
@@ -290,7 +309,7 @@ async def count_skills(
     db,
     q: str = "",
     category: str = "",
-    since: str = "",
+    since: str | datetime = "",
     *,
     include_pending: bool = False,
 ) -> int:
@@ -314,7 +333,7 @@ async def list_skills(
     sort: str = "newest",
     limit: int = 20,
     offset: int = 0,
-    since: str = "",
+    since: str | datetime = "",
     *,
     include_pending: bool = False,
 ) -> list[dict[str, Any]]:

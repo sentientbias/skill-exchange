@@ -8,6 +8,7 @@ Run:  pytest tests/test_god_tier_api.py
 import asyncio
 import os
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -82,7 +83,22 @@ def test_since_filter_composes_with_correct_param_numbers():
                           since="2026-09-14T00:00:00Z"))
     query, params = db.queries[0]
     assert "and s.updated_at > $3::timestamptz" in query, query
-    assert params == ("regex", "", "2026-09-14T00:00:00Z", 20, 0), params
+    assert params[0] == "regex" and params[1] == ""
+    # Regression: the since param must be a tz-aware datetime, not the raw
+    # string -- asyncpg rejects strings for $n::timestamptz and the live
+    # API 500d on ?since= (2026-09-21).
+    assert isinstance(params[2], datetime), params
+    assert params[2] == datetime(2026, 9, 14, tzinfo=timezone.utc), params
+    assert params[3:] == (20, 0), params
+
+
+def test_since_coerces_z_and_date_only_to_utc_aware():
+    assert store._coerce_since("2026-09-14T00:00:00Z") == datetime(
+        2026, 9, 14, tzinfo=timezone.utc)
+    assert store._coerce_since("2026-09-14") == datetime(
+        2026, 9, 14, tzinfo=timezone.utc)
+    passthrough = datetime(2026, 9, 14, 12, 30, tzinfo=timezone.utc)
+    assert store._coerce_since(passthrough) is passthrough
 
 
 def test_no_since_filter_when_empty():
