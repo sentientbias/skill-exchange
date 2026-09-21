@@ -156,10 +156,55 @@ def test_reads_are_not_budgeted():
 # client IP detection
 # ---------------------------------------------------------------------------
 
-def test_xff_first_entry_wins():
+def test_xff_rightmost_entry_wins():
+    # Proxies append to the right: "198.51.100.9" is a forged client prefix,
+    # "203.0.113.1" is the hop appended by the trusted proxy and is the
+    # only entry the client could not write.
     request = Request(_scope("POST", "/api/v1/installs",
                              xff="198.51.100.9, 203.0.113.1"))
+    assert _client_ip(request) == "203.0.113.1"
+
+
+def test_xff_rightmost_ignores_empty_entries():
+    request = Request(_scope("POST", "/api/v1/installs",
+                             xff="198.51.100.9, "))
     assert _client_ip(request) == "198.51.100.9"
+
+
+def test_forged_leftmost_xff_does_not_split_buckets():
+    # The bypass: rotating a forged leftmost prefix while the trusted
+    # proxy's rightmost hop stays constant must NOT mint fresh buckets.
+    # Budget 1/min: the second request -- different forgery, same
+    # rightmost hop -- is 429.
+    _reset()
+    saved = rl.BUCKETS.get(("POST", "/api/v1/installs"))
+    rl.BUCKETS[("POST", "/api/v1/installs")] = (1, 60)
+    real_clock = rl._monotonic
+    calls = {"i": 0}
+
+    def fake_monotonic():
+        calls["i"] += 1
+        return float(calls["i"])
+
+    rl._monotonic = fake_monotonic
+    try:
+        mw = RateLimitMiddleware(app=None)
+        statuses = []
+        for forged in ("10.0.0.1", "10.0.0.2"):
+            request = Request(
+                _scope("POST", "/api/v1/installs",
+                       xff=f"{forged}, 203.0.113.99"),
+                receive=_receive_factory([b"{}"]),
+            )
+            statuses.append(_run(mw.dispatch(request, _ok_next)).status_code)
+        assert statuses == [200, 429]
+    finally:
+        rl._monotonic = real_clock
+        if saved is None:
+            rl.BUCKETS.pop(("POST", "/api/v1/installs"), None)
+        else:
+            rl.BUCKETS[("POST", "/api/v1/installs")] = saved
+        _reset()
 
 
 def test_client_host_used_without_xff():

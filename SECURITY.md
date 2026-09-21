@@ -66,14 +66,17 @@ the human review process.
   threat 9). `POST /api/v1/installs` is budgeted at 30 hits / 60 s per IP
   and `POST /api/v1/accounts` at 10 / 60 s — generous for legitimate
   single-machine use, fatal to a naive forge/mint loop. Over budget returns
-  429 + `Retry-After` before any auth or DB work. Client IP is the first
-  `X-Forwarded-For` entry (Render terminates TLS and forwards the real
-  client address), else `request.client.host`. Authenticated endpoints are
-  deliberately not budgeted here: publishes and ratings are already gated by
-  API keys, signatures, and one-rating-per-account. Honest limit: the header
-  is client-spoofable, so this stops casual abuse, not a determined
-  adversary rotating forged headers; download counts remain client
-  self-reported, which is why the residual-risk note below now names them.
+  429 + `Retry-After` before any auth or DB work. Client IP is the
+  **rightmost** non-empty `X-Forwarded-For` entry (Render, the one trusted
+  terminating proxy, appends its own observation to the right), else
+  `request.client.host`. The previous leftmost read was a real bypass: a
+  rotated forged prefix minted a fresh bucket per request. Authenticated
+  endpoints are deliberately not budgeted here: publishes and ratings are
+  already gated by API keys, signatures, and one-rating-per-account. Honest
+  limit: an adversary with many real egress IPs can still spread writes
+  across buckets, and shared-NAT clients share one budget; download counts
+  remain client self-reported, which is why the residual-risk note below now
+  names them.
 
 ## The keypair flow (for publishers)
 
@@ -131,10 +134,12 @@ a note explaining what to fix; resubmission is always allowed.
 ## Residual risks (honest list)
 
 - **Download counts are client self-reported**: the 429 per-IP budgets stop
-  naive install-forging loops, but a determined adversary rotating source IPs
-  can still inflate `downloads`. Counts should be read as rough popularity
-  signal, not audited fact — install-time guidance (verify the signature)
-  stays the real trust anchor.
+  naive install-forging loops, but a determined adversary rotating real
+  source IPs can still inflate `downloads`. (A header-forgery shortcut
+  existed before 2026-09-21 — leftmost XFF read — and is closed; the
+  rightmost unforgeable hop is now the bucket key.) Counts should be read
+  as rough popularity signal, not audited fact — install-time guidance
+  (verify the signature) stays the real trust anchor.
 - **Determined human review evasion**: a cleverly obfuscated malicious skill
   can pass review. Mitigation is defense in depth (signatures + review +
   install-time skepticism), not any single layer.

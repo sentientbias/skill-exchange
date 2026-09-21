@@ -24,12 +24,18 @@ Behavior:
   Every other /api/* route is untouched.
 - Over budget -> 429 JSON + Retry-After header (seconds until the oldest
   hit in the window expires).
-- Client IP is the first X-Forwarded-For entry when present (Render
-  terminates TLS and forwards the real client address), else
-  request.client.host. Honest caveat: X-Forwarded-For is client-spoofable,
-  so this stops naive loops and casual abuse, not a determined adversary
-  rotating forged headers. The 1 MiB body guard (request_size_guard.py)
-  sits in front of this; order in main.py is body guard first.
+- Client IP is the RIGHTMOST X-Forwarded-For entry when present, else
+  request.client.host. Proxies append the peer they observed to the right
+  of the header; everything to the left is client-controlled. Render is the
+  one trusted terminating proxy and appends its own observation, so the
+  rightmost entry is the only one the client could not write -- keying on
+  the leftmost (the intuitive reading) let an attacker mint a fresh bucket
+  per request with a rotated forged prefix, bypassing the limit entirely.
+  Honest caveat: per-IP buckets still fall to an adversary with many real
+  egress IPs, and shared-NAT clients share a budget. This reading is only
+  sound while exactly one trusted proxy appends: if the proxy topology
+  changes, revisit. The 1 MiB body guard (request_size_guard.py) sits in
+  front of this; order in main.py is body guard first.
 - State is in-process (free-tier boxes run one worker). Buckets prune their
   own expired hits on every check, so memory is bounded by recent traffic.
 """
@@ -59,11 +65,17 @@ _hits: dict[str, list[float]] = {}
 
 
 def _client_ip(request: Request) -> str:
+    # Rightmost XFF entry: proxies append the peer they observed to the
+    # right, so the rightmost hop is the one the client could not write --
+    # Render (our trusted terminating proxy) appends the real client IP.
+    # Everything left of it is attacker-controlled and ignored. Without XFF,
+    # fall back to the direct peer (the proxy itself, in production).
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
+        entries = [e.strip() for e in xff.split(",")]
+        for entry in reversed(entries):
+            if entry:
+                return entry
     return request.client.host if request.client else "unknown"
 
 
