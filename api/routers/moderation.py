@@ -38,3 +38,20 @@ async def decide(
     return await store.decide_moderation(
         pool, str(account["id"]), queue_id, body.approve, body.note
     )
+
+
+@router.post("/moderation/skills/{slug}/delist")
+async def delist_skill(
+    slug: str,
+    account=Depends(moderator),
+    pool=Depends(get_db),
+):
+    """Delist a live skill (moderators only): pulls it from the public
+    catalog, detail pages, skill.md, and bundles. Used for Pro-lane
+    products that must not be freely downloadable."""
+    try:
+        return await store.delist_skill(pool, str(account["id"]), slug)
+    except ValueError as e:
+        from fastapi import HTTPException, status as http_status
+
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND, str(e))

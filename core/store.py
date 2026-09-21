@@ -669,6 +669,29 @@ async def decide_moderation(
     return result
 
 
+async def delist_skill(
+    db: asyncpg.Pool,
+    moderator_account_id: str,
+    slug: str,
+) -> dict[str, Any]:
+    """Delist a live skill: set status to 'rejected' so every public
+    endpoint (list, detail, skill.md, bundles) stops serving it.
+    Moderators only (checked by caller). Reversible via re-approval."""
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            "select id, status from skills where slug = $1", slug
+        )
+        if row is None:
+            raise ValueError("skill not found")
+        await conn.execute(
+            """update skills set status = 'rejected', updated_at = now()
+               where id = $1""",
+            row["id"],
+        )
+    return {"slug": slug, "previous_status": row["status"], "status": "rejected",
+            "delisted_by": moderator_account_id}
+
+
 # ---------------------------------------------------------------------------
 # referrals & pro passes
 # ---------------------------------------------------------------------------
