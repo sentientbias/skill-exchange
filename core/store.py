@@ -259,6 +259,54 @@ left join (select skill_id, sum(downloads) as total_downloads
 """
 
 
+def _list_filters(
+    q: str, category: str, since: str, *, include_pending: bool
+) -> tuple[str, list]:
+    """Shared WHERE-clause builder for list_skills() and count_skills().
+
+    Keeps the filter logic in exactly one place so the page and the total
+    can never disagree. params[0:2] are q and category; since, if present,
+    is appended last. Callers append their own trailing params (limit,
+    offset) and number them from len(params)+1.
+    """
+    status_filter = "" if include_pending else "and s.status = 'approved' "
+    params: list = [q or "", category or ""]
+    since_filter = ""
+    if since:
+        params.append(since)
+        since_filter = f"and s.updated_at > ${len(params)}::timestamptz "
+    where = (
+        "where ($1 = '' or s.slug ilike '%' || $1 || '%' "
+        "or s.name ilike '%' || $1 || '%' "
+        "or s.description ilike '%' || $1 || '%') "
+        "and ($2 = '' or s.category = $2) "
+        + status_filter
+        + since_filter
+    )
+    return where, params
+
+
+async def count_skills(
+    db,
+    q: str = "",
+    category: str = "",
+    since: str = "",
+    *,
+    include_pending: bool = False,
+) -> int:
+    """Total skills matching the list_skills() filters — drives pagination.
+
+    Cheap aggregate on the same WHERE clause, so a client paging with
+    limit/offset always knows how many results exist in total (npm-style
+    `total` on search responses).
+    """
+    where, params = _list_filters(q, category, since, include_pending=include_pending)
+    row = await db.fetchrow(
+        f"select count(*)::int as total from skills s {where}", *params
+    )
+    return int(row["total"])
+
+
 async def list_skills(
     db: asyncpg.Pool,
     q: str = "",
@@ -280,21 +328,13 @@ async def list_skills(
     order = _SORTS[sort]
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
-    status_filter = "" if include_pending else "and s.status = 'approved'"
-    params: list[Any] = [q or "", category or "", limit, offset]
-    since_filter = ""
-    if since:
-        params.append(since)
-        since_filter = f"and s.updated_at > ${len(params)}::timestamptz "
+    where, params = _list_filters(q, category, since, include_pending=include_pending)
+    params.extend([limit, offset])
+    ln = len(params)
     query = (
         _LIST_SELECT
-        + f"where ($1 = '' or s.slug ilike '%' || $1 || '%' "
-        + " or s.name ilike '%' || $1 || '%' "
-        + " or s.description ilike '%' || $1 || '%') "
-        + "and ($2 = '' or s.category = $2) "
-        + status_filter
-        + since_filter
-        + f" order by {order} limit $3 offset $4"
+        + where
+        + f" order by {order} limit ${ln - 1} offset ${ln}"
     )
     rows = await db.fetch(query, *params)
     return [_d(r) for r in rows]

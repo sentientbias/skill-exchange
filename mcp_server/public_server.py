@@ -275,7 +275,9 @@ def search_skills(
         sort: "newest" | "top" | "downloads" | "name".
         limit: how many results (1-50, default 10).
 
-    Returns {"skills": [...], "count": n}. Each skill has slug, name,
+    Returns {"skills": [...], "count": n} where count is the TOTAL number of
+    matching skills in the catalog (page-independent) -- so "how many are
+    there" survives pagination. Each skill has slug, name,
     description, category, publisher (handle or null), latest_version,
     avg_stars, rating_count, downloads, signed (bool), created_at, updated_at.
     """
@@ -297,7 +299,9 @@ def search_skills(
         params["category"] = category
     data = _http_get_json("/api/v1/skills", params)
     items = data.get("items") or []
-    return {"skills": items, "count": len(items)}
+    # The API reports the page-independent match total; only fall back to
+    # the page size against older API builds that don't send `total`.
+    return {"skills": items, "count": data.get("total", len(items))}
 
 
 @mcp.tool()

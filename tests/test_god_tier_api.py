@@ -81,8 +81,8 @@ def test_since_filter_composes_with_correct_param_numbers():
     run(store.list_skills(db, q="regex", sort="newest",
                           since="2026-09-14T00:00:00Z"))
     query, params = db.queries[0]
-    assert "and s.updated_at > $5::timestamptz" in query, query
-    assert params == ("regex", "", 20, 0, "2026-09-14T00:00:00Z"), params
+    assert "and s.updated_at > $3::timestamptz" in query, query
+    assert params == ("regex", "", "2026-09-14T00:00:00Z", 20, 0), params
 
 
 def test_no_since_filter_when_empty():
@@ -99,7 +99,7 @@ def test_since_does_not_leak_into_include_pending_paths():
                           include_pending=True))
     query, _ = db.queries[0]
     assert "s.status = 'approved'" not in query
-    assert "updated_at > $5" in query
+    assert "updated_at > $3" in query
 
 
 # --- public_stats ------------------------------------------------------------

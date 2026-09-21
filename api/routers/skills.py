@@ -46,6 +46,9 @@ async def list_skills(
         ),
         "limit": limit,
         "offset": offset,
+        "total": await store.count_skills(
+            pool, q=q, category=category, since=since,
+        ),
     }
 
 
