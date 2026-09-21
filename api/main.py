@@ -142,6 +142,15 @@ async def skill_detail(slug: str, pool=Depends(get_db)):
         skill = None
     if skill is None:
         return HTMLResponse(skill_not_found_html(slug), status_code=404)
+    # Latest SKILL.md for the inline "Skill contents" section (the registry
+    # README convention). Separate lookup keeps get_skill() light for the
+    # machine JSON and MCP paths, which don't need the body.
+    try:
+        ver = await store.get_version(pool, slug, "latest")
+        skill["latest_skill_md"] = (ver or {}).get("skill_md") or ""
+    except Exception:
+        log.warning("skill page: SKILL.md lookup failed for %r", slug)
+        skill["latest_skill_md"] = ""
     return HTMLResponse(skill_page_html(skill))
 
 

@@ -52,6 +52,124 @@ def _version_row(v: dict) -> str:
     )
 
 
+def _render_markdown(md: str) -> str:
+    """Render a SKILL.md body as sanitized HTML (registry README convention).
+
+    npm, PyPI, and the Hugging Face Hub all render the package README inline
+    on the package page -- the human visitor's main evaluation surface. The
+    Playbook skill page previously showed metadata only and linked out to
+    raw markdown, forcing an extra click to see what the skill actually
+    teaches. This closes the gap while keeping the page's no-JS,
+    server-rendered discipline.
+
+    Escape-first: the whole input is html-escaped BEFORE any decoration, so
+    publisher content can never inject markup, script, or javascript: URLs.
+    Only a small, presentation-only subset is supported (headings, code
+    fences/inline code, bold, italic, links, lists, paragraphs); anything
+    else degrades to plain paragraphs. Links allow http/https only.
+    """
+    import re
+
+    if not md or not str(md).strip():
+        return ""
+    # 1. Escape everything: from here on, "<script>" is inert text.
+    text = html.escape(str(md))
+    # 2. Lift fenced code blocks out so their contents get no decoration.
+    fences: list[str] = []
+
+    def _lift(m):
+        info = (m.group(1) or "").strip().split()[0] if m.group(1) else ""
+        body = m.group(2) or ""
+        if info:
+            fences.append(f'<pre><code class="lang">{info}\n{body}</code></pre>')
+        else:
+            fences.append(f"<pre><code>{body}</code></pre>")
+        return f"\x00FENCE{len(fences) - 1}\x00"
+
+    text = re.sub(
+        r"```([^\n\x00]*)\n(.*?)```", _lift, text, flags=re.DOTALL
+    )
+    # 3. Inline decorations (safe: input is already escaped).
+    text = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
+    text = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", text)
+
+    def _link(m):
+        # url comes from already-escaped text; only the scheme whitelist
+        # matters now, no further escaping needed.
+        label, url = m.group(1), m.group(2)
+        return f'<a href="{url}">{label}</a>'
+
+    text = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", _link, text)
+    # Any [label](url) with a non-http(s) scheme is left as literal text by
+    # the whitelist above; render those as the bare label so a javascript:
+    # or data: payload never survives as visible markup bait either.
+    text = re.sub(r"\[([^\]\x00]+)\]\((?![^)\s]*https?://)[^)\s]*\)", r"\1", text)
+    # 4. Block structure, line by line.
+    lines = text.split("\n")
+    out: list[str] = []
+    buf: list[str] = []
+    list_open: str | None = None  # "ul" or "ol"
+
+    def flush_para():
+        if buf:
+            out.append("<p>" + " ".join(buf) + "</p>")
+            buf.clear()
+
+    def close_list():
+        nonlocal list_open
+        if list_open:
+            out.append(f"</{list_open}>")
+            list_open = None
+
+    fence_re = re.compile(r"^\x00FENCE(\d+)\x00$")
+    hr_re = re.compile(r"^(-{3,}|\*{3,}|_{3,})$")
+    for line in lines:
+        stripped = line.strip()
+        fm = fence_re.match(stripped)
+        if fm:
+            flush_para()
+            close_list()
+            out.append(fences[int(fm.group(1))])
+            continue
+        if hr_re.match(stripped):
+            flush_para()
+            close_list()
+            out.append("<hr>")
+            continue
+        hm = re.match(r"^(#{1,3})\s+(.*)$", stripped)
+        if hm:
+            flush_para()
+            close_list()
+            level = len(hm.group(1)) + 2  # # -> h3 (page already uses h2)
+            out.append(f"<h{level}>{hm.group(2).strip()}</h{level}>")
+            continue
+        um = re.match(r"^[-*]\s+(.*)$", stripped)
+        om = re.match(r"^\d+\.\s+(.*)$", stripped)
+        if um or om:
+            flush_para()
+            kind = "ul" if um else "ol"
+            item = (um or om).group(1).strip()
+            if list_open != kind:
+                close_list()
+                out.append(f"<{kind}>")
+                list_open = kind
+            out.append(f"<li>{item}</li>")
+            continue
+        if list_open and stripped and out and out[-1].endswith("</li>"):
+            # soft-wrapped continuation line inside the current list item
+            out[-1] = out[-1][:-5] + " " + stripped + "</li>"
+            continue
+        if not stripped:
+            flush_para()
+            close_list()
+            continue
+        buf.append(stripped)
+    flush_para()
+    close_list()
+    return "\n".join(out)
+
+
 def _rating_row(r: dict) -> str:
     stars = int(r.get("stars") or 0)
     handle = html.escape(str(r.get("handle") or "anonymous"))
@@ -102,6 +220,18 @@ def skill_page_html(skill: dict) -> str:
         else '<p class="muted">No ratings yet — be the first to rate it.</p>'
     )
 
+    # Inline SKILL.md: the registry README convention (npm/PyPI/HF render
+    # the package README on the page). The route attaches the latest
+    # approved SKILL.md as skill["latest_skill_md"]; absent means no
+    # section, never a broken page.
+    latest_md = str(skill.get("latest_skill_md") or "")
+    skillmd_body = _render_markdown(latest_md)
+    skillmd_html = (
+        '<h2>Skill contents</h2>\n<div class="skillmd">' + skillmd_body + "</div>"
+        if skillmd_body
+        else ""
+    )
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -145,6 +275,16 @@ footer{{text-align:center;color:#94a3b8;font-size:13px;padding:48px 24px 40px}}
 footer a{{color:#64748b}}
 code{{background:#f1f5f9;padding:1px 7px;border-radius:6px;font-size:13px}}
 .install code{{background:none;padding:0;color:inherit;font-size:inherit}}
+.skillmd{{font-size:15px;color:var(--ink)}}
+.skillmd h3,.skillmd h4,.skillmd h5{{margin:26px 0 8px;letter-spacing:-.01em}}
+.skillmd h3{{font-size:20px}}.skillmd h4{{font-size:17px}}.skillmd h5{{font-size:15.5px}}
+.skillmd p{{margin:10px 0}}
+.skillmd pre{{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px 16px;overflow-x:auto;font-size:13.5px}}
+.skillmd pre .lang{{color:#22d3ee;font-size:12px;display:block;margin-bottom:8px;letter-spacing:.06em;text-transform:uppercase}}
+.skillmd ul,.skillmd ol{{margin:10px 0;padding-left:24px}}
+.skillmd li{{margin:4px 0}}
+.skillmd hr{{border:none;border-top:1px solid var(--line);margin:22px 0}}
+.skillmd a{{color:#0e7490}}
 </style>
 </head>
 <body>
@@ -166,6 +306,7 @@ code{{background:#f1f5f9;padding:1px 7px;border-radius:6px;font-size:13px}}
     <a class="btn" href="/api/v1/skills/{slug}/skill.md">Read the SKILL.md</a>
     <a class="btn" href="/api/v1/skills/{slug}">Machine JSON</a>
   </div>
+  {skillmd_html}
   <h2>Versions</h2>
   {version_rows}
   {pubkey_html}

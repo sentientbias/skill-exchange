@@ -170,7 +170,11 @@ def test_not_found_page_escapes_slug_and_links_home():
 
 class _GoodPool:
     async def fetchrow(self, query, *args):
-        return dict(_ROW)
+        row = dict(_ROW)
+        if "from skill_versions v" in query:
+            # store.get_version's query: the route attaches this SKILL.md
+            row["skill_md"] = _MD_BODY
+        return row
 
     async def fetch(self, query, *args):
         if "skill_versions" in query:
@@ -203,6 +207,10 @@ def test_route_serves_detail_page():
     assert "Regex Mastery" in body
     assert "./install.sh regex-mastery" in body
     assert RAW_DOMAIN not in body
+    # route attaches the latest SKILL.md; the README section renders inline
+    assert "Skill contents" in body
+    assert "<h3>Regex Mastery</h3>" in body
+    assert "<strong>extracting data</strong>" in body
 
 
 def test_route_404_on_unknown_slug():
@@ -225,3 +233,90 @@ def test_route_404_not_500_on_db_error():
 
     resp = _run(skill_detail(slug="regex-mastery", pool=_DeadPool()))
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# inline SKILL.md (registry README convention)
+# ---------------------------------------------------------------------------
+
+_MD_BODY = """# Regex Mastery
+
+Use this skill when **extracting data** from logs or *rewriting text*.
+
+## Patterns
+
+- `\\d{4}-\\d{2}-\\d{2}` — ISO dates
+- Timestamps and UUIDs
+
+```python
+import re
+re.findall(r"\\d+", text)
+```
+
+1. First step
+2. Second step
+
+See [docs](https://example.com/guide) for more.
+"""
+
+_MD_EVIL = (
+    "<script>alert(1)</script>\n\n"
+    '[x](javascript:alert(2))\n\n'
+    '```html\n<script>alert(3)</script>\n```\n'
+)
+
+
+def _skill_with_md(md):
+    skill = _full_skill()
+    skill["latest_skill_md"] = md
+    return skill
+
+
+def test_skill_md_rendered_inline():
+    page = skill_page_html(_skill_with_md(_MD_BODY))
+    assert '<div class="skillmd">' in page
+    assert "<h2>Skill contents</h2>" in page
+    assert "<h3>Regex Mastery</h3>" in page
+    assert "<strong>extracting data</strong>" in page
+    assert "<em>rewriting text</em>" in page
+    assert "<h4>Patterns</h4>" in page
+    assert "<ul>" in page and "<li>" in page
+    assert "<pre><code" in page
+    assert '<a href="https://example.com/guide">docs</a>' in page
+    assert "<ol>" in page
+    # raw "Read the SKILL.md" link still present for exact-copy use
+    assert "/api/v1/skills/regex-mastery/skill.md" in page
+
+
+def test_skill_md_uses_route_attached_body():
+    skill = _skill_with_md(_MD_BODY)
+    page = skill_page_html(skill)
+    assert "Regex Mastery" in page
+    assert '<div class="skillmd">' in page
+
+
+def test_skill_md_missing_degrades():
+    skill = _full_skill()  # _VERSIONS rows have no skill_md key
+    page = skill_page_html(skill)
+    assert '<div class="skillmd">' not in page
+    assert "Skill contents" not in page
+    # page still fully renders
+    assert "v1.2.0" in page
+
+
+def test_skill_md_xss_is_inert():
+    page = skill_page_html(_skill_with_md(_MD_EVIL))
+    assert "<script>alert(1)</script>" not in page
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page
+    assert "javascript:" not in page
+    assert "<script>alert(3)</script>" not in page  # inside code fence too
+    assert "&lt;script&gt;alert(3)&lt;/script&gt;" in page
+
+
+def test_skill_md_soft_wraps_and_hr():
+    from api.skill_page import _render_markdown
+    out = _render_markdown("- first line\n  wrapped continuation\n\n---\n")
+    assert out.count("<li>") == 1
+    assert "first line wrapped continuation" in out
+    assert "<hr>" in out
+    assert "<p>---</p>" not in out

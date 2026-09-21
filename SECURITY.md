@@ -34,6 +34,14 @@ the human review process.
   a moderator approves them (unless `AUTO_APPROVE` is set, which is dev-only).
 - **API keys are hashed.** Only SHA-256 digests are stored; plaintext is
   shown once at creation. Keys are revocable and per-device.
+- **Publisher content is rendered escape-first** (`api/skill_page.py`).
+  The per-skill page renders the SKILL.md inline (registry README
+  convention), but the entire body is HTML-escaped *before* any markdown
+  decoration is applied; only a presentation-only subset is emitted
+  (headings, code, bold/italic, lists, paragraphs, http(s) links), and
+  non-http(s) link schemes degrade to plain label text. A moderated,
+  signature-verified publisher still cannot smuggle markup, script, or
+  `javascript:` URLs into another visitor's browser via a skill page.
 - **One rating per account per skill**, upserted on re-rate (limits casual
   ballot-stuffing; see residual risks).
 - **Signing-key continuity enforced server-side** (`store.create_version`).
