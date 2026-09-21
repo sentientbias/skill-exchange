@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from core import db, store
@@ -25,8 +25,11 @@ from .request_size_guard import RequestSizeGuardMiddleware
 from .routers import accounts, bundles, feed, moderation, publish, ratings, skills
 
 import logging
+import os
 
 log = logging.getLogger(__name__)
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @asynccontextmanager
@@ -140,6 +143,43 @@ async def skill_detail(slug: str, pool=Depends(get_db)):
     if skill is None:
         return HTMLResponse(skill_not_found_html(slug), status_code=404)
     return HTMLResponse(skill_page_html(skill))
+
+
+@app.get("/install.sh", include_in_schema=False)
+async def install_sh():
+    """The verified installer, one curl away.
+
+    Downloads the skill, verifies the Ed25519 signature client-side, and
+    FAILS CLOSED (refuses to install) when PyNaCl is missing or the
+    signature is bad. Usage: curl -sSf <api>/install.sh -o install.sh
+    && chmod +x install.sh && ./install.sh <slug> [version] [dest-dir]
+    """
+    path = os.path.join(_REPO_ROOT, "install.sh")
+    if not os.path.isfile(path):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "installer not found")
+    return FileResponse(
+        path,
+        media_type="text/plain; charset=utf-8",
+        filename="install.sh",
+    )
+
+
+@app.get("/playbook-mcp.py", include_in_schema=False)
+async def playbook_mcp():
+    """The public MCP server as a single downloadable script.
+
+    Talks only to the public REST API (no DATABASE_URL needed) — search,
+    fetch, verified-install, what's-new, and stats tools for any MCP
+    client. Requires `pip install "mcp" pynacl` on the agent's machine.
+    """
+    path = os.path.join(_REPO_ROOT, "mcp_server", "public_server.py")
+    if not os.path.isfile(path):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "mcp server not found")
+    return FileResponse(
+        path,
+        media_type="text/plain; charset=utf-8",
+        filename="playbook-mcp.py",
+    )
 
 
 app.include_router(feed.router)

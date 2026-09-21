@@ -247,7 +247,8 @@ select s.id, s.slug, s.name, s.description, s.category, s.status,
        lv.version as latest_version,
        coalesce(rt.avg_stars, 0)::float as avg_stars,
        coalesce(rt.rating_count, 0)::int as rating_count,
-       coalesce(dl.total_downloads, 0)::int as downloads
+       coalesce(dl.total_downloads, 0)::int as downloads,
+       (lv.signature is not null and lv.signature <> '') as signed
 from skills s
 left join accounts a on a.id = s.author_account_id
 left join skill_versions lv on lv.id = s.latest_version_id
@@ -265,15 +266,26 @@ async def list_skills(
     sort: str = "newest",
     limit: int = 20,
     offset: int = 0,
+    since: str = "",
     *,
     include_pending: bool = False,
 ) -> list[dict[str, Any]]:
-    """List skills. Public callers see only approved skills."""
+    """List skills. Public callers see only approved skills.
+
+    `since` is an ISO-8601 timestamp (validated by the caller): only
+    skills updated after it are returned. Powers "what's new" polling
+    for agents that want to come back for fresh inventory.
+    """
     _check_sort(sort)
     order = _SORTS[sort]
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
     status_filter = "" if include_pending else "and s.status = 'approved'"
+    params: list[Any] = [q or "", category or "", limit, offset]
+    since_filter = ""
+    if since:
+        params.append(since)
+        since_filter = f"and s.updated_at > ${len(params)}::timestamptz "
     query = (
         _LIST_SELECT
         + f"where ($1 = '' or s.slug ilike '%' || $1 || '%' "
@@ -281,10 +293,45 @@ async def list_skills(
         + " or s.description ilike '%' || $1 || '%') "
         + "and ($2 = '' or s.category = $2) "
         + status_filter
+        + since_filter
         + f" order by {order} limit $3 offset $4"
     )
-    rows = await db.fetch(query, q or "", category or "", limit, offset)
+    rows = await db.fetch(query, *params)
     return [_d(r) for r in rows]
+
+
+async def public_stats(db: asyncpg.Pool) -> dict[str, Any]:
+    """God-tier front-door numbers for agents and front-ends.
+
+    One cheap aggregate for the catalog totals plus the per-category
+    breakdown (drives filter pills without a second round-trip).
+    """
+    row = await db.fetchrow(
+        """select count(*)::int as skill_count,
+                  count(distinct s.author_account_id)::int as publisher_count,
+                  coalesce(sum(dl.total_downloads), 0)::int as total_downloads
+           from skills s
+           left join (select skill_id, sum(downloads) as total_downloads
+                      from skill_versions group by skill_id) dl
+             on dl.skill_id = s.id
+           where s.status = 'approved'"""
+    )
+    cats = await db.fetch(
+        """select coalesce(s.category, 'general') as category,
+                  count(*)::int as count
+           from skills s
+           where s.status = 'approved'
+           group by 1 order by 2 desc"""
+    )
+    d = _d(row)
+    return {
+        "skill_count": d["skill_count"],
+        "publisher_count": d["publisher_count"],
+        "total_downloads": d["total_downloads"],
+        "categories": [
+            {"category": r["category"], "count": r["count"]} for r in cats
+        ],
+    }
 
 
 async def catalog_stats(db: asyncpg.Pool) -> dict[str, int]:
