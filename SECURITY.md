@@ -17,6 +17,7 @@ the human review process.
 | 6 | Credential theft | Stolen API key used to publish as someone else |
 | 7 | Key confusion | Attacker publishes under a lookalike handle |
 | 8 | Resource exhaustion via oversized payloads | Open or cheaply-reachable write endpoints (anonymous account signup, anonymous install logging, authenticated publishes) accept unbounded request bodies; FastAPI parses the whole JSON body into memory before any store-layer check, so a single huge POST spikes memory on a free-tier box |
+| 9 | Metric fabrication / Sybil registration via unthrottled anonymous endpoints | The anonymous endpoints (`POST /api/v1/installs`, `POST /api/v1/accounts`) had no rate limit: a single script could mint unlimited accounts (Sybil fuel for threat #5) or forge install events at will, inflating the `downloads` counts shown on the front door and per-skill detail pages. Downloads are client self-reported (PyPI instead derives them from CDN logs), so the count is only as honest as the cheapest writer |
 
 ## Mitigations in this codebase
 
@@ -53,6 +54,18 @@ the human review process.
   200k-char `skill_md` ceiling, which mirrors the store-layer check so the
   error surfaces at the API boundary. Legit payloads are unaffected: the
   largest real publish (~250 KB of JSON) has 4x headroom.
+- **Per-IP rate limits on anonymous write endpoints** (`api/rate_limit.py`,
+  threat 9). `POST /api/v1/installs` is budgeted at 30 hits / 60 s per IP
+  and `POST /api/v1/accounts` at 10 / 60 s — generous for legitimate
+  single-machine use, fatal to a naive forge/mint loop. Over budget returns
+  429 + `Retry-After` before any auth or DB work. Client IP is the first
+  `X-Forwarded-For` entry (Render terminates TLS and forwards the real
+  client address), else `request.client.host`. Authenticated endpoints are
+  deliberately not budgeted here: publishes and ratings are already gated by
+  API keys, signatures, and one-rating-per-account. Honest limit: the header
+  is client-spoofable, so this stops casual abuse, not a determined
+  adversary rotating forged headers; download counts remain client
+  self-reported, which is why the residual-risk note below now names them.
 
 ## The keypair flow (for publishers)
 
@@ -109,6 +122,11 @@ a note explaining what to fix; resubmission is always allowed.
 
 ## Residual risks (honest list)
 
+- **Download counts are client self-reported**: the 429 per-IP budgets stop
+  naive install-forging loops, but a determined adversary rotating source IPs
+  can still inflate `downloads`. Counts should be read as rough popularity
+  signal, not audited fact — install-time guidance (verify the signature)
+  stays the real trust anchor.
 - **Determined human review evasion**: a cleverly obfuscated malicious skill
   can pass review. Mitigation is defense in depth (signatures + review +
   install-time skepticism), not any single layer.

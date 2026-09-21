@@ -20,6 +20,7 @@ from api.skill_page import skill_not_found_html, skill_page_html
 
 from .deps import get_db  # noqa: F401  (re-exported for routers)
 from .query_guard import RejectUnknownQueryParamsMiddleware
+from .rate_limit import RateLimitMiddleware
 from .request_size_guard import RequestSizeGuardMiddleware
 from .routers import accounts, bundles, feed, moderation, publish, ratings, skills
 
@@ -61,6 +62,13 @@ app.add_middleware(RejectUnknownQueryParamsMiddleware)
 # the bodies were unbounded. The cap is generous (1 MiB) next to the largest
 # legit payload (~250 KB for a max-size SKILL.md publish).
 app.add_middleware(RequestSizeGuardMiddleware)
+
+# Per-IP rate limits on the anonymous write endpoints (signup, install
+# logging): with no throttle a single script could mint unlimited accounts
+# or forge install events and inflate the download counts on the front door
+# and skill detail pages. Over budget -> 429 + Retry-After. Authenticated
+# endpoints are not budgeted (API keys + signatures already gate them).
+app.add_middleware(RateLimitMiddleware)
 
 # Local brand assets (self-contained; the free service's face must not depend
 # on the paid service's uptime). Served from api/static, shipped in the image.
