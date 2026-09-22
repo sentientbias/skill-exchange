@@ -808,7 +808,7 @@ async def delist_skill(
 ) -> dict[str, Any]:
     """Delist a live skill: set status to 'rejected' so every public
     endpoint (list, detail, skill.md, bundles) stops serving it.
-    Moderators only (checked by caller). Reversible via re-approval."""
+    Moderators only (checked by caller). Reversible via relist."""
     async with db.acquire() as conn:
         row = await conn.fetchrow(
             "select id, status from skills where slug = $1", slug
@@ -822,6 +822,33 @@ async def delist_skill(
         )
     return {"slug": slug, "previous_status": row["status"], "status": "rejected",
             "delisted_by": moderator_account_id}
+
+
+async def relist_skill(
+    db: asyncpg.Pool,
+    moderator_account_id: str,
+    slug: str,
+) -> dict[str, Any]:
+    """Relist a delisted skill: set status back to 'approved' so every
+    public endpoint serves it again. Moderators only (checked by caller).
+    Exact inverse of delist_skill."""
+    async with db.acquire() as conn:
+        row = await conn.fetchrow(
+            "select id, status from skills where slug = $1", slug
+        )
+        if row is None:
+            raise ValueError("skill not found")
+        if row["status"] == "approved":
+            return {"slug": slug, "previous_status": "approved",
+                    "status": "approved", "relisted_by": moderator_account_id,
+                    "note": "already listed"}
+        await conn.execute(
+            """update skills set status = 'approved', updated_at = now()
+               where id = $1""",
+            row["id"],
+        )
+    return {"slug": slug, "previous_status": row["status"], "status": "approved",
+            "relisted_by": moderator_account_id}
 
 
 # ---------------------------------------------------------------------------

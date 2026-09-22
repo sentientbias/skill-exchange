@@ -55,3 +55,19 @@ async def delist_skill(
         from fastapi import HTTPException, status as http_status
 
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, str(e))
+
+
+@router.post("/moderation/skills/{slug}/relist")
+async def relist_skill(
+    slug: str,
+    account=Depends(moderator),
+    pool=Depends(get_db),
+):
+    """Relist a delisted skill (moderators only): restores it to the public
+    catalog, detail pages, skill.md, and bundles. Exact inverse of delist."""
+    try:
+        return await store.relist_skill(pool, str(account["id"]), slug)
+    except ValueError as e:
+        from fastapi import HTTPException, status as http_status
+
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND, str(e))
