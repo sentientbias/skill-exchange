@@ -7,6 +7,7 @@ connection) explicitly -- no globals, easy to test.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -97,8 +98,33 @@ def _auto_approve() -> bool:
     return os.environ.get("AUTO_APPROVE", "false").lower() in ("1", "true", "yes")
 
 
+def _manifest_to_dict(manifest: Any) -> dict[str, Any]:
+    """Normalize the stored manifest to a dict.
+
+    asyncpg returns jsonb columns as str unless a codec is registered, so
+    rows arrive with ``manifest`` as a JSON-encoded string (e.g. ``'{}'``).
+    Clients (install.sh, the MCP server, third-party agents) then have to
+    double-decode. Normalize once at the store boundary so every API
+    response carries a real JSON object.
+    """
+    if isinstance(manifest, dict):
+        return manifest
+    if isinstance(manifest, str):
+        try:
+            parsed = json.loads(manifest)
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 def _d(row: asyncpg.Record | None) -> dict[str, Any] | None:
-    return dict(row) if row is not None else None
+    if row is None:
+        return None
+    d = dict(row)
+    if "manifest" in d:
+        d["manifest"] = _manifest_to_dict(d.get("manifest"))
+    return d
 
 
 # ---------------------------------------------------------------------------

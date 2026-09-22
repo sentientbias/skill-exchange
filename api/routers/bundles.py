@@ -44,16 +44,10 @@ def _receipt(slug: str, ver: dict) -> dict:
 
 
 def _build_zip(slug: str, ver: dict) -> bytes:
-    # asyncpg returns jsonb columns as str unless a codec is registered, so the
-    # stored manifest may come back as a JSON-encoded string -- normalize to a
-    # dict so manifest.json in the bundle is an object, not a double-encoded
-    # string (a programmatic json.loads() must get a dict).
+    # store._d() normalizes the manifest to a dict at the DB boundary, so by
+    # the time we get here it is always a JSON object (never a double-encoded
+    # string). The `or {}` stays as cheap insurance for hand-built dicts.
     manifest = ver.get("manifest") or {}
-    if isinstance(manifest, str):
-        try:
-            manifest = json.loads(manifest)
-        except ValueError:
-            manifest = {}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{slug}/SKILL.md", ver["skill_md"])
