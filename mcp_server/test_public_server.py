@@ -48,6 +48,40 @@ def _mock_http(payload):
     return mock.patch.object(ps, "_http_get_json", side_effect=fake)
 
 
+def _mock_http_with_report(payload, report_ok=True, report_exc=None):
+    """Mock GET layer (like _mock_http) plus the install-report POST layer.
+
+    Returns a context manager patching both, and a dict capturing the POST
+    path/payload so tests can assert exactly what was reported.
+    """
+    captured = {}
+
+    def fake_get(path, params=None):
+        return payload
+
+    def fake_post(path, post_payload):
+        captured["path"] = path
+        captured["payload"] = post_payload
+        if report_exc is not None:
+            raise report_exc
+        return {"ok": report_ok, "slug": SLUG, "version": VERSION}
+
+    class _Ctx:
+        def __enter__(self):
+            self._g = mock.patch.object(ps, "_http_get_json",
+                                        side_effect=fake_get).__enter__()
+            self._p = mock.patch.object(ps, "_http_post_json",
+                                        side_effect=fake_post).__enter__()
+            return captured
+
+        def __exit__(self, *exc):
+            self._p.__exit__(*exc)
+            self._g.__exit__(*exc)
+            return False
+
+    return _Ctx()
+
+
 def test_fail_closed_when_pynacl_missing(tmp_path):
     """(a) No nacl -> clear error, nothing written."""
     payload, _ = _make_version_json()
@@ -78,7 +112,7 @@ def test_fail_closed_on_missing_fields(tmp_path):
 def test_success_path_writes_verified_bytes(tmp_path):
     """(c) Valid signature -> SKILL.md + manifest.json with exact bytes."""
     payload, _ = _make_version_json()
-    with _mock_http(payload):
+    with _mock_http_with_report(payload):
         result = ps.install_skill(SLUG, VERSION, dest_dir=str(tmp_path))
     assert result["verified"] is True
     assert result["version"] == VERSION
@@ -88,6 +122,46 @@ def test_success_path_writes_verified_bytes(tmp_path):
         assert fh.read() == SKILL_MD, "written bytes must equal signed skill_md"
     manifest_path = os.path.join(str(tmp_path), "manifest.json")
     assert os.path.exists(manifest_path)
+
+
+def test_install_reports_to_registry(tmp_path):
+    """Verified install reports itself: POST /api/v1/installs with
+    slug, resolved version, and client tag."""
+    payload, _ = _make_version_json()
+    with _mock_http_with_report(payload) as captured:
+        result = ps.install_skill(SLUG, VERSION, dest_dir=str(tmp_path))
+    assert result["reported"] is True
+    assert captured["path"] == "/api/v1/installs"
+    assert captured["payload"]["slug"] == SLUG
+    assert captured["payload"]["version"] == VERSION  # resolved, not "latest"
+    assert captured["payload"]["client"] == "mcp/1.0"
+    assert "counts as a download" in result["note"]
+
+
+def test_install_succeeds_when_report_fails(tmp_path):
+    """Telemetry failure never undoes a verified install: files written,
+    verified=True, reported=False with an honest reason."""
+    payload, _ = _make_version_json()
+    with _mock_http_with_report(
+        payload, report_exc=PlaybookError("boom")
+    ) as captured:
+        result = ps.install_skill(SLUG, VERSION, dest_dir=str(tmp_path))
+    assert result["verified"] is True
+    assert result["reported"] is False
+    assert captured["path"] == "/api/v1/installs"  # the attempt was made
+    md_path = os.path.join(str(tmp_path), "SKILL.md")
+    with open(md_path, encoding="utf-8") as fh:
+        assert fh.read() == SKILL_MD
+    assert "NOT counted" in result["note"]
+
+
+def test_install_reports_resolved_version_not_requested(tmp_path):
+    """install_skill(slug, "latest") reports the RESOLVED version the
+    registry returned, so the counter lands on the right row."""
+    payload, _ = _make_version_json()
+    with _mock_http_with_report(payload) as captured:
+        ps.install_skill(SLUG, "latest", dest_dir=str(tmp_path))
+    assert captured["payload"]["version"] == VERSION
 
 
 def test_whats_new_parses_7d_to_iso():

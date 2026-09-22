@@ -6,7 +6,8 @@ Any agent with Python can search, preview, and verified-install free skills.
     search_skills   - search the free catalog by keyword / category
     get_skill       - full metadata + latest SKILL.md preview for one skill
     install_skill   - fetch a version, verify its ed25519 signature (fail closed),
-                      save SKILL.md locally
+                      save SKILL.md locally, and report the install so the
+                      registry download counter reflects real usage
     whats_new       - skills approved in the last 24h / 7d / 30d (or since a date)
     get_stats       - registry totals: skills, downloads, publishers, categories
 
@@ -206,9 +207,68 @@ def _http_get_text(path: str, params: dict | None = None) -> str:
         ) from None
 
 
+def _http_post_json(path: str, payload: dict) -> dict:
+    """POST a JSON payload and parse a JSON response. Monkeypatchable for
+    tests: patch public_server._http_post_json."""
+    url = API_BASE + path
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={"User-Agent": _USER_AGENT,
+                 "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise PlaybookError(
+            f"Playbook API POST {path} failed: HTTP {e.code}"
+            + (f" ({e.reason})" if getattr(e, "reason", None) else "")
+        ) from None
+    except (http.client.IncompleteRead, http.client.RemoteDisconnected) as e:
+        raise PlaybookError(
+            f"Playbook API POST {path} failed: truncated response ({e})"
+        ) from None
+    except urllib.error.URLError as e:
+        raise PlaybookError(
+            f"Playbook API unreachable at {API_BASE}{path}: {e.reason}"
+        ) from None
+    except (TimeoutError, OSError) as e:
+        raise PlaybookError(
+            f"Playbook API POST {path} failed: {e}"
+        ) from None
+    if not isinstance(data, dict):
+        raise PlaybookError(
+            f"Playbook API POST {path} returned an unexpected JSON shape"
+        )
+    return data
+
+
 # ---------------------------------------------------------------------------
 # Signature verification (fail closed). Mirrors install.sh exactly.
 # ---------------------------------------------------------------------------
+def _report_install(slug: str, version: str) -> tuple[bool, str]:
+    """Best-effort install telemetry.
+
+    POSTs to the anonymous /api/v1/installs endpoint so the registry's
+    download counter reflects real installs. This is telemetry, not
+    security: a reporting failure must NEVER undo or block a verified
+    install, so it returns (ok, note) instead of raising.
+    """
+    try:
+        resp = _http_post_json(
+            "/api/v1/installs",
+            {"slug": slug, "version": version, "client": "mcp/1.0"},
+        )
+    except PlaybookError as e:
+        return False, f"registry install report failed: {e}"
+    if resp.get("ok") is True:
+        return True, ""
+    return False, f"registry did not confirm the install report: {resp!r}"
+
+
 def _verify_signature(
     slug: str, version: str, skill_md: str, signature: str, signer_pubkey: str
 ) -> None:
@@ -332,17 +392,20 @@ def install_skill(slug: str, version: str = "latest", dest_dir: str = "") -> dic
     Fails closed: if PyNaCl is missing, the signature is invalid, or any
     required field is missing, NOTHING is written and a clear error is raised.
 
+    After a successful verified install, the install is REPORTED to the
+    registry (anonymous POST /api/v1/installs) so the download counter
+    reflects real usage -- same convention as install.sh. Reporting is
+    best-effort: if the registry is unreachable, the install still
+    succeeds and the result says reported=False with the reason.
+
     Args:
         slug: skill slug, e.g. "regex-mastery".
         version: version string, or "latest" (default).
         dest_dir: where to install; default "./skills/<slug>/".
                   SKILL.md is written inside it (plus manifest.json when present).
 
-    Returns {"path": ..., "version": ..., "verified": True, "note": ...}.
-    NOTE: this direct version-JSON install does NOT increment the registry's
-    download counter (bundle downloads do). To report it, POST
-    {"slug": ..., "version": ...} to {API_BASE}/api/v1/installs -- see the
-    returned note.
+    Returns {"path": ..., "version": ..., "verified": True,
+             "reported": bool, "note": ...}.
     """
     slug = _safe_slug(slug)
     version = (version or "latest").strip() or "latest"
@@ -367,17 +430,19 @@ def install_skill(slug: str, version: str = "latest", dest_dir: str = "") -> dic
         with open(os.path.join(dest, "manifest.json"), "w", encoding="utf-8") as fh:
             json.dump(ver["manifest"], fh, indent=2, default=str)
 
+    reported, report_note = _report_install(slug, resolved_version)
+    note = "Signature verified against the publisher's key."
+    if reported:
+        note += " Install reported to the registry (counts as a download)."
+    else:
+        note += f" Install NOT counted in registry downloads: {report_note}"
+
     return {
         "path": md_path,
         "version": resolved_version,
         "verified": True,
-        "note": (
-            "Signature verified against the publisher's key. This install did "
-            "NOT increment the registry download counter (only bundle "
-            "downloads count). To report it, POST "
-            f'{{"slug": "{slug}", "version": "{resolved_version}"}} to '
-            f"{API_BASE}/api/v1/installs."
-        ),
+        "reported": reported,
+        "note": note,
     }
 
 
