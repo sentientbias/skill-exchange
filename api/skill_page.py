@@ -20,6 +20,7 @@ referenced only through musefm.lol pages; raw service domains never appear.
 from __future__ import annotations
 
 import html
+from urllib.parse import quote
 
 # Canonical family pages (single source of truth: ~/workspace/CANONICAL_LINKS.md).
 PLAYBOOK_URL = "https://musefm.lol/playbook"  # the Playbook's own page
@@ -40,15 +41,36 @@ def _date(value) -> str:
     return s[:10] if len(s) >= 10 else s
 
 
-def _version_row(v: dict) -> str:
-    version = html.escape(str(v.get("version") or ""))
+def _version_row(v: dict, slug: str) -> str:
+    """One version-history row, npm-style: every version is actionable.
+
+    npm's Versions tab gives each release its own copy-paste install line
+    (``npm i pkg@x.y.z``) and tarball link, because agents and humans pin
+    known-good versions for reproducibility. The Playbook page used to show
+    only date + install count per version, even though both the pinned
+    install (``install.sh <slug> [version]``) and the per-version bundle
+    (``/api/v1/bundles/<slug>?version=``) already existed -- the visitor
+    just had to discover them in docs. This puts them on the row.
+    """
+    version_raw = str(v.get("version") or "")
+    version = html.escape(version_raw)
+    slug_raw = str(slug or "")
+    slug_esc = html.escape(slug_raw)
     date = html.escape(_date(v.get("created_at")))
     downloads = int(v.get("downloads") or 0)
+    # URL-safe bundle link; the slug is pre-validated by
+    # core.store._check_slug, this quoting is belt-and-suspenders.
+    bundle_href = (
+        "/api/v1/bundles/"
+        f"{quote(slug_raw, safe='')}?version={quote(version_raw, safe='')}"
+    )
     return (
         f'<div class="ver-row"><span class="ver">v{version}</span>'
         f'<span class="ver-meta">{date} · '
         f"{downloads} install{'s' if downloads != 1 else ''} · "
-        "Ed25519-signed</span></div>"
+        "Ed25519-signed</span>"
+        f'<code class="ver-cmd">./install.sh {slug_esc} {version}</code>'
+        f'<a class="ver-bundle" href="{bundle_href}">bundle (.zip)</a></div>'
     )
 
 
@@ -201,7 +223,9 @@ def skill_page_html(skill: dict) -> str:
     published = html.escape(_date(skill.get("created_at")))
 
     versions = skill.get("versions") or []
-    version_rows = "".join(_version_row(v) for v in versions)
+    version_rows = "".join(
+        _version_row(v, str(skill.get("slug") or "")) for v in versions
+    )
 
     latest_pubkey = ""
     if versions:
@@ -261,9 +285,12 @@ h2{{font-size:19px;letter-spacing:-.02em;margin:34px 0 10px}}
 .links{{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 0}}
 .btn{{display:inline-block;padding:10px 20px;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none;border:1px solid var(--line);color:#0e7490;background:#fff}}
 .btn:hover{{border-color:#0e7490}}
-.ver-row{{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}}
+.ver-row{{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line)}}
 .ver-row:last-child{{border-bottom:none}}
 .ver-meta{{font-size:13.5px;color:var(--muted)}}
+.ver-cmd{{margin-left:auto}}
+.ver-bundle{{font-size:13.5px;color:#0e7490;text-decoration:none}}
+.ver-bundle:hover{{text-decoration:underline}}
 .pubkey{{font-size:13px;color:var(--muted);margin:12px 0 0;word-break:break-all}}
 .rating{{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 10px}}
 .rating-head{{display:flex;justify-content:space-between;gap:10px;font-size:14px}}

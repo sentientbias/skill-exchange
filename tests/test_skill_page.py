@@ -110,6 +110,35 @@ def test_detail_page_lists_versions_and_pubkey():
     assert "cHVia2V5QUJD" in page  # signer pubkey (already public via receipts)
 
 
+def test_detail_page_version_rows_are_actionable():
+    # npm's Versions tab gives every release its own copy-paste install
+    # line (npm i pkg@x.y.z) and tarball link; the Playbook row does the
+    # same via the already-existing [version] arg on install.sh and the
+    # already-existing ?version= on the bundle endpoint.
+    page = skill_page_html(_full_skill())
+    assert "./install.sh regex-mastery 1.0.0" in page
+    assert "./install.sh regex-mastery 1.2.0" in page
+    assert "/api/v1/bundles/regex-mastery?version=1.0.0" in page
+    assert "/api/v1/bundles/regex-mastery?version=1.2.0" in page
+
+
+def test_version_row_escapes_version_and_slug():
+    from api.skill_page import _version_row
+
+    row = _version_row(
+        {
+            "version": '1.0"><script>alert(1)</script>',
+            "created_at": "2026-09-10 12:00:00",
+            "downloads": 0,
+        },
+        'bad"><script>alert(2)</script>',
+    )
+    assert "<script>" not in row
+    assert "&lt;script&gt;" in row
+    # URL quoting makes the raw payload inert even in the href
+    assert '">alert' not in row
+
+
 def test_detail_page_lists_ratings():
     page = skill_page_html(_full_skill())
     assert "Solved my parsing problem in an afternoon." in page
