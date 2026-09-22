@@ -28,6 +28,18 @@ the human review process.
   install, full stop.
 - **Private keys never touch the server.** Keypairs are generated locally
   (`scripts/keygen.py`). The server stores only public keys and signatures.
+- **Interactive API docs are off in production** (`api/main.py::_api_docs_enabled`).
+  FastAPI ships Swagger UI (`/docs`), ReDoc (`/redoc`), and the raw OpenAPI
+  schema (`/openapi.json`) enabled by default — a full route/parameter/
+  schema map of the API plus a browser "Try it out" client that fires
+  requests from any visitor's browser. Serving that unauthenticated on a
+  public registry is a recon amplifier (OWASP A05 security misconfiguration;
+  standard practice is to disable or gate docs on public-facing services),
+  so the routes are only registered when `ENABLE_API_DOCS=1` is set. The
+  flag is unset on the production Render service, where all three paths
+  404; local devs opt in explicitly. No internal consumer reads
+  `/openapi.json` (the MCP server, install.sh, and the storefront all use
+  the machine JSON endpoints), so nothing depends on the docs existing.
 - **Immutable versions.** Published versions are never edited in place; fixes
   are new versions, each signed. History is auditable.
 - **Human moderation queue.** New skills and new versions are `pending` until

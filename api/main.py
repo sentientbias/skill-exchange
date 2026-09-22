@@ -1,7 +1,9 @@
 """Skill Exchange REST API.
 
 Run locally:  uvicorn api.main:app --reload
-Docs:         http://localhost:8000/docs  (OpenAPI/Swagger)
+Docs:         interactive docs (/docs, /openapi.json) are dev-only — set
+              ENABLE_API_DOCS=1 to enable them; they stay off otherwise,
+              including on the production Render service.
 """
 from __future__ import annotations
 
@@ -32,6 +34,28 @@ log = logging.getLogger(__name__)
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _api_docs_enabled() -> bool:
+    """Interactive API docs are a dev-only convenience.
+
+    FastAPI ships Swagger UI (/docs), ReDoc (/redoc), and the raw OpenAPI
+    schema (/openapi.json) enabled by default — a full route/parameter/
+    schema map of the API, plus a browser "Try it out" client that fires
+    requests from any visitor's browser. Serving that unauthenticated on a
+    public registry is a recon amplifier (OWASP A05 security
+    misconfiguration), so it is OFF by default. Set ENABLE_API_DOCS=1 to
+    turn it on for local development.
+    """
+    return os.environ.get("ENABLE_API_DOCS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+_API_DOCS = _api_docs_enabled()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.get_pool()  # fail fast if DATABASE_URL is wrong
@@ -47,6 +71,12 @@ app = FastAPI(
     ),
     version="1.0.0",
     lifespan=lifespan,
+    # Interactive docs are off unless ENABLE_API_DOCS=1 (dev-only recon
+    # surface; see _api_docs_enabled). None = the routes are not registered
+    # at all, so they 404 rather than redirect.
+    docs_url="/docs" if _API_DOCS else None,
+    redoc_url="/redoc" if _API_DOCS else None,
+    openapi_url="/openapi.json" if _API_DOCS else None,
 )
 
 app.add_middleware(
