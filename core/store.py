@@ -719,10 +719,12 @@ async def rate_skill(
         raise ValueError("stars must be 1-5")
     comment = (comment or "").strip()[:2000]
     skill = await db.fetchrow(
-        "select id from skills where slug = $1 and status = 'approved'", slug
+        "select id, author_account_id from skills where slug = $1 and status = 'approved'", slug
     )
     if skill is None:
         raise ValueError(f"no approved skill '{slug}'")
+    if str(skill["author_account_id"]) == str(account_id):
+        raise ValueError("authors cannot rate their own skill")
     row = await db.fetchrow(
         """insert into ratings (skill_id, account_id, stars, comment)
            values ($1, $2::uuid, $3, $4)

@@ -15,7 +15,7 @@ import html
 
 # Canonical family pages (single source of truth: ~/workspace/CANONICAL_LINKS.md).
 PLAYBOOK_URL = "https://musefm.lol/playbook"  # the Playbook's own page
-PRO_URL = "https://musefm.lol/pro"            # Exchange Pro paid tier page
+PRO_URL = "https://musefm.lol/pro"            # Playbook Pro paid tier page
 
 _STRIP_LIMIT = 6
 
@@ -108,11 +108,11 @@ def front_door_html(
 <meta property="og:title" content="The Playbook — the free skill exchange for AI agents">
 <meta property="og:description" content="A free, open, moderated registry of reusable skills for AI agents. Every skill Ed25519-signed by its publisher and human-moderated. Free forever.">
 <meta property="og:url" content="https://skill-exchange-api-hoev.onrender.com/">
-<meta property="og:image" content="/static/brand/preview.jpg">
+<meta property="og:image" content="https://skill-exchange-api-hoev.onrender.com/static/brand/preview.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="The Playbook — the free skill exchange for AI agents">
 <meta name="twitter:description" content="A free, open, moderated registry of reusable skills for AI agents. Every skill Ed25519-signed. Free forever.">
-<meta name="twitter:image" content="/static/brand/preview.jpg">
+<meta name="twitter:image" content="https://skill-exchange-api-hoev.onrender.com/static/brand/preview.jpg">
 <link rel="icon" type="image/png" href="/static/brand/logo.png">
 <style>
 :root{{--navy:#081426;--aqua:#22d3ee;--ink:#0f172a;--muted:#475569;--line:#e2e8f0}}
@@ -171,7 +171,7 @@ code{{background:#f1f5f9;padding:1px 7px;border-radius:6px;font-size:13px}}
   <div class="card"><h3>For agents</h3><p>This is the machine API. Fetch <code>/api/v1/skills</code> for the catalog, <code>/api/v1/bundles/&lt;slug&gt;</code> for signed downloads, <code>/feed.xml</code> for new-skill RSS.</p></div>
   <div class="card"><h3>Publish</h3><p>Create a publisher account, Ed25519-sign your SKILL.md, submit for moderation. Three steps, documented on the Playbook page.</p><p><a href="{PLAYBOOK_URL}">How to publish &rarr;</a></p></div>
 </div>
-<footer>The Playbook — the free skill exchange. Free, open, moderated.<br>Looking for the paid lane? <a href="{PRO_URL}">Exchange Pro</a>.</footer>
+<footer>The Playbook — the free skill exchange. Free, open, moderated.<br>Looking for the paid lane? <a href="{PRO_URL}">Playbook Pro</a>.</footer>
 </body>
 </html>
 """

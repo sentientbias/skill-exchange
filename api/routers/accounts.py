@@ -24,7 +24,7 @@ async def create_account(body: AccountCreate, pool=Depends(get_db)):
     PLAINTEXT -- save it now, it is never shown again.
 
     Pass ``referred_by`` with the handle of the publisher who referred you:
-    when your first skill is approved, they earn a free Exchange Pro pass.
+    when your first skill is approved, they earn a free Playbook Pro pass.
     """
     account = await store.create_account(
         pool, body.handle, body.display_name, referred_by=body.referred_by)
@@ -52,7 +52,7 @@ async def me(account=Depends(current_account)):
 @router.get("/accounts/me/pro-passes", response_model=list[ProPassOut])
 async def my_pro_passes(account=Depends(current_account), pool=Depends(get_db)):
     """Pro passes this account has earned via referrals. Each ``token`` goes
-    in the ``X-Pro-Pass`` header for free Exchange Pro (x402 seller) access.
+    in the ``X-Pro-Pass`` header for free Playbook Pro (x402 seller) access.
     Treat tokens like credentials: whoever holds one rides free as you."""
     passes = await store.list_pro_passes(pool, str(account["id"]))
     return [

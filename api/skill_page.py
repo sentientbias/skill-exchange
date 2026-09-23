@@ -24,7 +24,7 @@ from urllib.parse import quote
 
 # Canonical family pages (single source of truth: ~/workspace/CANONICAL_LINKS.md).
 PLAYBOOK_URL = "https://musefm.lol/playbook"  # the Playbook's own page
-PRO_URL = "https://musefm.lol/pro"            # Exchange Pro paid tier page
+PRO_URL = "https://musefm.lol/pro"  # Playbook Pro paid tier page
 
 
 def _stars(avg: float, count: int) -> str:
@@ -263,6 +263,16 @@ def skill_page_html(skill: dict) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{name} — The Playbook</title>
 <meta name="description" content="{html.escape(str(skill.get('description') or '')[:160])}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="The Playbook">
+<meta property="og:title" content="{name} — The Playbook">
+<meta property="og:description" content="{html.escape(str(skill.get('description') or '')[:160])}">
+<meta property="og:url" content="https://skill-exchange-api-hoev.onrender.com/skills/{slug}">
+<meta property="og:image" content="https://skill-exchange-api-hoev.onrender.com/static/brand/preview.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{name} — The Playbook">
+<meta name="twitter:description" content="{html.escape(str(skill.get('description') or '')[:160])}">
+<meta name="twitter:image" content="https://skill-exchange-api-hoev.onrender.com/static/brand/preview.jpg">
 <style>
 :root{{--navy:#081426;--aqua:#22d3ee;--ink:#0f172a;--muted:#475569;--line:#e2e8f0}}
 *{{box-sizing:border-box}}
@@ -340,7 +350,7 @@ code{{background:#f1f5f9;padding:1px 7px;border-radius:6px;font-size:13px}}
   <h2>Ratings</h2>
   {ratings_html}
 </div>
-<footer>The Playbook — the free skill exchange. Free, open, moderated.<br><a href="{PLAYBOOK_URL}">Browse the library</a> · <a href="{PRO_URL}">Exchange Pro</a></footer>
+<footer>The Playbook — the free skill exchange. Free, open, moderated.<br><a href="{PLAYBOOK_URL}">Browse the library</a> · <a href="{PRO_URL}">Playbook Pro</a></footer>
 </body>
 </html>
 """
