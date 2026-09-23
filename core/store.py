@@ -12,6 +12,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
+from difflib import get_close_matches
 from typing import Any
 
 import asyncpg
@@ -499,6 +500,42 @@ async def get_version(
             slug, version,
         )
     return _d(row)
+
+
+async def suggest_slugs(
+    db: asyncpg.Pool, slug: str, *, limit: int = 3
+) -> list[str]:
+    """npm-style 'did you mean' for an unknown slug.
+
+    Returns up to `limit` approved slugs close to the requested one by
+    sequence similarity. One cheap query over approved slugs; called only
+    on the 404 path, never on the hot path.
+    """
+    rows = await db.fetch(
+        "select slug from skills where status = 'approved'"
+    )
+    candidates = [r["slug"] for r in rows if r["slug"]]
+    return get_close_matches(
+        slug, candidates, n=max(1, limit), cutoff=0.6
+    )
+
+
+async def list_version_labels(
+    db: asyncpg.Pool, slug: str
+) -> list[str]:
+    """Version labels of one approved skill, oldest first.
+
+    Powers the recoverable 404: a request for a version that doesn't
+    exist gets the list of versions that do.
+    """
+    rows = await db.fetch(
+        """select v.version from skill_versions v
+           join skills s on s.id = v.skill_id
+           where s.slug = $1 and s.status = 'approved'
+           order by v.created_at""",
+        slug,
+    )
+    return [r["version"] for r in rows if r["version"]]
 
 
 # ---------------------------------------------------------------------------

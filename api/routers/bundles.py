@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from api.deps import get_db
+from api.routers.skills import _raise_unknown_skill, _raise_unknown_version
 from core import store
 
 router = APIRouter(tags=["bundles"])
@@ -103,9 +104,10 @@ async def download_bundle(
     """Download one skill as a zip bundle (SKILL.md + manifest + receipt)."""
     ver = await store.get_version(pool, slug, version)
     if ver is None:
-        label = version or "latest"
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, f"no version '{label}' of '{slug}'")
+        skill = await store.get_skill(pool, slug)
+        if skill is None:
+            await _raise_unknown_skill(slug, pool)
+        await _raise_unknown_version(slug, version or "latest", pool)
     data = _build_zip(slug, ver)
     filename = f"{slug}-{ver['version']}.zip"
     return StreamingResponse(

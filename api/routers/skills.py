@@ -25,6 +25,37 @@ def _validate_since(since: str) -> str:
     return since
 
 
+async def _raise_unknown_skill(slug: str, pool) -> None:
+    """404 for an unknown slug that tells the client what DOES exist.
+
+    The detail is a dict: a human-readable message (with inline
+    'did you mean' hint when there is one) plus a machine-readable
+    `suggestions` list so agents and install.sh can recover in one
+    round trip instead of guessing.
+    """
+    suggestions = await store.suggest_slugs(pool, slug)
+    message = f"no skill '{slug}'"
+    if suggestions:
+        quoted = ", ".join(f"'{s}'" for s in suggestions)
+        message += f"; did you mean: {quoted}?"
+    raise HTTPException(
+        status.HTTP_404_NOT_FOUND,
+        {"message": message, "suggestions": suggestions},
+    )
+
+
+async def _raise_unknown_version(slug: str, version: str, pool) -> None:
+    """404 for an unknown version that lists the versions that exist."""
+    available = await store.list_version_labels(pool, slug)
+    message = f"no version '{version}' of '{slug}'"
+    if available:
+        message += f"; available versions: {', '.join(available)}"
+    raise HTTPException(
+        status.HTTP_404_NOT_FOUND,
+        {"message": message, "available_versions": available},
+    )
+
+
 @router.get("/skills")
 async def list_skills(
     q: str = Query(default="", description="Search name/description/slug"),
@@ -66,7 +97,7 @@ async def stats(pool=Depends(get_db)):
 async def get_skill(slug: str, pool=Depends(get_db)):
     skill = await store.get_skill(pool, slug)
     if skill is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no skill '{slug}'")
+        await _raise_unknown_skill(slug, pool)
     return skill
 
 
@@ -79,8 +110,10 @@ async def get_version(slug: str, version: str, pool=Depends(get_db)):
     """
     ver = await store.get_version(pool, slug, version)
     if ver is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, f"no version '{version}' of '{slug}'")
+        skill = await store.get_skill(pool, slug)
+        if skill is None:
+            await _raise_unknown_skill(slug, pool)
+        await _raise_unknown_version(slug, version, pool)
     ver["verify"] = {
         "algorithm": "ed25519",
         "canonical_format": "utf8(slug + '\\n' + version + '\\n' + skill_md)",
@@ -96,7 +129,7 @@ async def read_skill_md(slug: str, pool=Depends(get_db)):
     """
     ver = await store.get_version(pool, slug, None)
     if ver is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no skill '{slug}'")
+        await _raise_unknown_skill(slug, pool)
     return PlainTextResponse(
         ver["skill_md"],
         media_type="text/markdown; charset=utf-8",
@@ -112,8 +145,10 @@ async def read_version_skill_md(slug: str, version: str, pool=Depends(get_db)):
     """Raw SKILL.md of one specific version, as markdown."""
     ver = await store.get_version(pool, slug, version)
     if ver is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, f"no version '{version}' of '{slug}'")
+        skill = await store.get_skill(pool, slug)
+        if skill is None:
+            await _raise_unknown_skill(slug, pool)
+        await _raise_unknown_version(slug, version, pool)
     return PlainTextResponse(
         ver["skill_md"],
         media_type="text/markdown; charset=utf-8",
