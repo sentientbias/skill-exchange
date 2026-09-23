@@ -20,7 +20,7 @@ referenced only through musefm.lol pages; raw service domains never appear.
 from __future__ import annotations
 
 import html
-from urllib.parse import quote
+from urllib.parse import quote, quote_plus
 
 # Canonical family pages (single source of truth: ~/workspace/CANONICAL_LINKS.md).
 PLAYBOOK_URL = "https://musefm.lol/playbook"  # the Playbook's own page
@@ -214,7 +214,14 @@ def skill_page_html(skill: dict) -> str:
     name = html.escape(str(skill.get("name") or skill.get("slug") or "?"))
     slug = html.escape(str(skill.get("slug") or ""))
     desc = html.escape(str(skill.get("description") or "").strip())
-    category = html.escape(str(skill.get("category") or "general"))
+    category_raw = str(skill.get("category") or "general")
+    category = html.escape(category_raw)
+    # The category is a link, not dead text: npm renders package keywords as
+    # links into its registry search, and the Playbook's /browse filter
+    # chips are the matching surface. This closes the browse -> detail ->
+    # browse loop. quote_plus keeps the query value safely encoded even if
+    # a category ever carries markup-looking characters.
+    category_href = "/browse?category=" + quote_plus(category_raw)
     publisher = html.escape(str(skill.get("publisher") or "unknown"))
     version = html.escape(str(skill.get("latest_version") or ""))
     avg = float(skill.get("avg_stars") or 0)
@@ -284,6 +291,8 @@ body{{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Robo
 h1{{font-size:clamp(28px,4.5vw,40px);letter-spacing:-.03em;margin:10px 0 4px}}
 .ver{{font-size:12px;color:var(--muted);background:#f1f5f9;border-radius:6px;padding:1px 8px;white-space:nowrap}}
 .cat{{font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#64748b}}
+.cat a{{color:inherit;text-decoration:none}}
+.cat a:hover{{color:#0e7490;text-decoration:underline}}
 .meta{{font-size:14px;color:var(--muted);margin:6px 0 0}}
 .lede{{font-size:17px;color:var(--ink);margin:18px 0 30px}}
 .stats{{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 34px}}
@@ -328,7 +337,7 @@ code{{background:#f1f5f9;padding:1px 7px;border-radius:6px;font-size:13px}}
 <div class="wrap">
   <div class="crumbs"><a href="/">The Playbook</a> / skills / {slug}</div>
   <h1>{name} <span class="ver">v{version}</span></h1>
-  <div class="cat">{category}</div>
+  <div class="cat"><a href="{category_href}">{category}</a></div>
   <p class="meta">by {publisher} · published {published}</p>
   <p class="lede">{desc}</p>
   <div class="stats">

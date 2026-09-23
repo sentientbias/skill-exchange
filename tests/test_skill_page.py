@@ -349,3 +349,33 @@ def test_skill_md_soft_wraps_and_hr():
     assert "first line wrapped continuation" in out
     assert "<hr>" in out
     assert "<p>---</p>" not in out
+
+
+# ---------------------------------------------------------------------------
+# category chip link (Design lane 2026-09-23: close the browse -> detail ->
+# browse loop, npm's keyword-link pattern)
+# ---------------------------------------------------------------------------
+
+def test_detail_page_category_links_to_browse_filter():
+    # The category label on the package page is a link into the catalog
+    # filter, the same as npm's keyword links into package search.
+    page = skill_page_html(_full_skill())
+    assert '<div class="cat"><a href="/browse?category=devtools">devtools</a></div>' in page
+
+
+def test_detail_page_category_defaults_to_general_link():
+    skill = _full_skill()
+    skill.pop("category", None)
+    page = skill_page_html(skill)
+    assert '<div class="cat"><a href="/browse?category=general">general</a></div>' in page
+
+
+def test_detail_page_category_escapes_and_encodes_hostile_value():
+    skill = _full_skill()
+    skill["category"] = 'dev"><script>alert(1)</script>'
+    page = skill_page_html(skill)
+    # label: escaped so it renders as text, never markup
+    assert "&lt;script&gt;" in page
+    # href: url-encoded so it can't break out of the query string
+    assert 'href="/browse?category=dev%22%3E%3Cscript%3Ealert%281%29%3C%2Fscript%3E"' in page
+    assert '"><script>alert(1)</script>' not in page
