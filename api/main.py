@@ -18,6 +18,7 @@ from core import db, store
 from core.build_info import build_info
 
 from api.front_door import front_door_html
+from api.browse_page import browse_error_html, browse_page_html
 from api.skill_page import skill_not_found_html, skill_page_html
 
 from .deps import get_db  # noqa: F401  (re-exported for routers)
@@ -154,6 +155,60 @@ async def index(pool=Depends(get_db)):
                     exc_info=True)
         latest = top = stats = None
     return HTMLResponse(front_door_html(latest, top, stats))
+
+
+@app.get("/browse", include_in_schema=False)
+async def browse(
+    q: str = "",
+    category: str = "",
+    sort: str = "newest",
+    page: int = 1,
+    pool=Depends(get_db),
+):
+    """Searchable, filterable catalog page (the registry browse slot).
+
+    npm, PyPI, and the Hugging Face Hub all give their catalog a browse
+    surface; the Playbook's HTML side previously had only two six-item
+    strips. Server-rendered, no JS, plain GET params (so agent clients read
+    it too). Unknown sort values and categories degrade to the defaults
+    rather than erroring. DB outage renders a 503 page, never a 500.
+    """
+    from api.browse_page import _PER_PAGE
+
+    q = (q or "")[:100].strip()
+    if sort not in ("newest", "top", "downloads", "name"):
+        sort = "newest"
+    page = max(1, int(page or 1))
+    try:
+        stats = await store.public_stats(pool)
+        known = {str(c.get("category") or "") for c in stats.get("categories") or []}
+        if category not in known:
+            category = ""
+        total = await store.count_skills(pool, q=q, category=category)
+        pages = max(1, (total + _PER_PAGE - 1) // _PER_PAGE)
+        page = min(page, pages)  # a stale page link shows the last page
+        results = await store.list_skills(
+            pool,
+            q=q,
+            category=category,
+            sort=sort,
+            limit=_PER_PAGE,
+            offset=(page - 1) * _PER_PAGE,
+        )
+    except Exception:
+        log.warning("browse: DB unavailable, serving 503", exc_info=True)
+        return HTMLResponse(browse_error_html(), status_code=503)
+    return HTMLResponse(
+        browse_page_html(
+            q=q,
+            category=category,
+            sort=sort,
+            page=page,
+            total=total,
+            results=results,
+            categories=stats.get("categories") or [],
+        )
+    )
 
 
 @app.get("/skills/{slug}", include_in_schema=False)

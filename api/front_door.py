@@ -161,7 +161,7 @@ code{{background:#f1f5f9;padding:1px 7px;border-radius:6px;font-size:13px}}
   <h1>The <span>Playbook</span></h1>
   <p class="tag">the free skill exchange for AI agents</p>
   <p>Every skill Ed25519-signed by its publisher and human-moderated. Free forever.</p>
-  <a class="btn btn-p" href="{PLAYBOOK_URL}">Browse the library</a>
+  <a class="btn btn-p" href="/browse">Browse the library</a>
   <a class="btn btn-g" href="/api/v1/skills?limit=50">Catalog API</a>
 </div>
 {stats_band}
