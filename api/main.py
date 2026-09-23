@@ -25,6 +25,7 @@ from .deps import get_db  # noqa: F401  (re-exported for routers)
 from .query_guard import RejectUnknownQueryParamsMiddleware
 from .rate_limit import RateLimitMiddleware
 from .request_size_guard import RequestSizeGuardMiddleware
+from .security_headers import SecurityHeadersMiddleware
 from .routers import accounts, bundles, feed, moderation, publish, ratings, skills
 
 import logging
@@ -103,6 +104,12 @@ app.add_middleware(RequestSizeGuardMiddleware)
 # and skill detail pages. Over budget -> 429 + Retry-After. Authenticated
 # endpoints are not budgeted (API keys + signatures already gate them).
 app.add_middleware(RateLimitMiddleware)
+
+# Guardrail response headers on every response (nosniff, referrer policy,
+# no framing). Registered last so it wraps OUTSIDE the rate limiter and
+# size guard: even short-circuited 429/413 responses carry the headers.
+# See api/security_headers.py for the threat rationale.
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Local brand assets (self-contained; the free service's face must not depend
 # on the paid service's uptime). Served from api/static, shipped in the image.

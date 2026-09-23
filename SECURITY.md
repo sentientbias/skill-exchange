@@ -56,6 +56,18 @@ the human review process.
   `javascript:` URLs into another visitor's browser via a skill page.
 - **One rating per account per skill**, upserted on re-rate (limits casual
   ballot-stuffing; see residual risks).
+- **Security response headers on every response** (`api/security_headers.py`).
+  The registry serves publisher-influenced bytes to browsers — HTML pages
+  rendering escaped publisher markdown, raw SKILL.md served `inline` as
+  `text/markdown`, and zip bundles. Every response (including short-circuited
+  413/429/422/404s, since the middleware is registered outermost) carries
+  `X-Content-Type-Options: nosniff` (a hostile byte sequence can't be
+  MIME-sniffed into a document in a visitor's browser),
+  `Referrer-Policy: strict-origin-when-cross-origin` (registry URLs don't
+  leak to publisher-linked third parties), and `X-Frame-Options: DENY`
+  (pages with trust cues like "signature verified" can't be framed into a
+  clickjacking overlay). Safe because auth is bearer-header only (no
+  cookies); CORS is untouched.
 - **Signing-key continuity enforced server-side** (`store.create_version`).
   A new version must be signed with a key the skill has already used (compared
   case-insensitively on the hex); a silent key swap by a compromised account
