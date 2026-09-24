@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import io
+import json
 import os
 import subprocess
 import sys
+import urllib.error
 from unittest import mock
 
 import pytest
@@ -68,10 +71,14 @@ def _mock_http_with_report(payload, report_ok=True, report_exc=None):
 
     class _Ctx:
         def __enter__(self):
+            # NB: keep the PATCHER (not the mock __enter__ returns), or the
+            # patches leak into later tests -- __enter__ returns the mock.
             self._g = mock.patch.object(ps, "_http_get_json",
-                                        side_effect=fake_get).__enter__()
+                                        side_effect=fake_get)
+            self._g.__enter__()
             self._p = mock.patch.object(ps, "_http_post_json",
-                                        side_effect=fake_post).__enter__()
+                                        side_effect=fake_post)
+            self._p.__enter__()
             return captured
 
         def __exit__(self, *exc):
@@ -202,6 +209,84 @@ def test_exits_with_clear_message_when_mcp_missing():
     )
     assert proc.returncode == 1
     assert 'pip install "mcp"' in proc.stderr
+
+
+def _http_404(path, detail):
+    """Build an urllib.error.HTTPError like the live API's recoverable 404s."""
+    body = json.dumps({"detail": detail}).encode("utf-8")
+    return urllib.error.HTTPError(
+        "https://api.example.test" + path, 404, "Not Found", {},
+        io.BytesIO(body),
+    )
+
+
+def test_error_message_surfaces_suggestions():
+    msg = ps._http_error_message(
+        "GET", "/api/v1/skills/regex-mastrery", 404,
+        json.dumps({"detail": {
+            "message": "no skill 'regex-mastrery'; did you mean: 'regex-mastery'?",
+            "suggestions": ["regex-mastery"],
+        }}).encode("utf-8"),
+    )
+    assert "HTTP 404" in msg
+    assert "suggestions: regex-mastery" in msg
+    assert "did you mean" in msg
+
+
+def test_error_message_surfaces_available_versions():
+    msg = ps._http_error_message(
+        "GET", "/api/v1/skills/regex-mastery/versions/9.9.9", 404,
+        json.dumps({"detail": {
+            "message": "no version '9.9.9' of 'regex-mastery'; "
+                       "available versions: 1.0.0",
+            "available_versions": ["1.0.0"],
+        }}).encode("utf-8"),
+    )
+    assert "HTTP 404" in msg
+    assert "available versions: 1.0.0" in msg
+
+
+def test_error_message_handles_string_detail():
+    msg = ps._http_error_message(
+        "POST", "/api/v1/installs", 429,
+        json.dumps({"detail": "rate limit exceeded"}).encode("utf-8"),
+    )
+    assert msg == ("Playbook API POST /api/v1/installs failed: HTTP 429"
+                   " -- rate limit exceeded")
+
+
+def test_error_message_falls_back_on_garbage_body():
+    for body in (b"", b"<html>proxy error</html>",
+                 json.dumps({"error": "weird"}).encode("utf-8")):
+        msg = ps._http_error_message("GET", "/api/v1/skills", 502, body)
+        assert msg == "Playbook API GET /api/v1/skills failed: HTTP 502"
+
+
+def test_get_skill_404_surfaces_suggestions():
+    """A typo'd slug through get_skill must raise the did-you-mean
+    recovery payload, not a bare HTTP 404."""
+    err = _http_404("/api/v1/skills/regex-mastrery", {
+        "message": "no skill 'regex-mastrery'; did you mean: 'regex-mastery'?",
+        "suggestions": ["regex-mastery"],
+    })
+    with mock.patch.object(ps.urllib.request, "urlopen", side_effect=err):
+        with pytest.raises(PlaybookError, match="HTTP 404") as exc:
+            ps.get_skill("regex-mastrery")
+    assert "suggestions: regex-mastery" in str(exc.value)
+
+
+def test_install_skill_404_surfaces_available_versions(tmp_path):
+    """A bogus version through install_skill must list what exists."""
+    err = _http_404("/api/v1/skills/regex-mastery/versions/9.9.9", {
+        "message": "no version '9.9.9' of 'regex-mastery'; "
+                   "available versions: 1.0.0",
+        "available_versions": ["1.0.0"],
+    })
+    with mock.patch.object(ps.urllib.request, "urlopen", side_effect=err):
+        with pytest.raises(PlaybookError, match="HTTP 404") as exc:
+            ps.install_skill(SLUG, "9.9.9", dest_dir=str(tmp_path))
+    assert "available versions: 1.0.0" in str(exc.value)
+    assert list(tmp_path.iterdir()) == [], "nothing may be written on failure"
 
 
 if __name__ == "__main__":

@@ -92,6 +92,36 @@ class PlaybookError(Exception):
     """A clean, user-facing error. Never a traceback of internals."""
 
 
+def _http_error_message(method: str, path: str, code: int,
+                        body: bytes) -> str:
+    """Build an error message from an HTTP error response, preserving the
+    registry's machine-readable recovery payload.
+
+    The API's 404s carry {"detail": {"message", "suggestions" |
+    "available_versions"}} so clients can recover in one round trip
+    (see api/routers/skills.py). A bare "HTTP 404" swallows that and
+    forces an agent to guess; surface it instead.
+    """
+    base = f"Playbook API {method} {path} failed: HTTP {code}"
+    try:
+        detail = json.loads(body.decode("utf-8")).get("detail")
+    except (ValueError, UnicodeDecodeError, AttributeError):
+        return base
+    if isinstance(detail, str):
+        return f"{base} -- {detail}"
+    if not isinstance(detail, dict):
+        return base
+    parts = [base]
+    if detail.get("message"):
+        parts.append(str(detail["message"]))
+    for key, label in (("suggestions", "suggestions"),
+                       ("available_versions", "available versions")):
+        vals = detail.get(key)
+        if vals:
+            parts.append(f"{label}: {', '.join(str(v) for v in vals)}")
+    return " -- ".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # HTTP layer (stdlib urllib -- zero extra deps). Monkeypatchable for tests:
 # patch public_server._http_get_json / public_server._http_get_text.
@@ -132,8 +162,14 @@ def _curl_get(url: str) -> tuple[int, bytes, str]:
                 f"Playbook API fallback fetch failed for {url}: "
                 f"{proc.stderr.strip() or 'curl error'}"
             ) from None
+        try:
+            with open(bp, "rb") as fh:
+                err_body = fh.read()
+        except OSError:
+            err_body = b""
         if status >= 400:
-            raise PlaybookError(f"Playbook API GET {url} failed: HTTP {status}")
+            raise PlaybookError(_http_error_message("GET", url, status,
+                                                    err_body))
         ctype = ""
         try:
             with open(hp, encoding="utf-8", errors="replace") as fh:
@@ -158,9 +194,12 @@ def _request(path: str, params: dict | None = None) -> tuple[int, bytes, str]:
             ctype = resp.headers.get("Content-Type", "")
             return resp.status, body, ctype
     except urllib.error.HTTPError as e:
+        try:
+            body = e.read()
+        except Exception:  # noqa: BLE001 - an unreadable body must not hide the status
+            body = b""
         raise PlaybookError(
-            f"Playbook API GET {path} failed: HTTP {e.code}"
-            + (f" ({e.reason})" if getattr(e, "reason", None) else "")
+            _http_error_message("GET", path, e.code, body)
         ) from None
     except (http.client.IncompleteRead, http.client.RemoteDisconnected):
         # Truncated through the egress proxy under urllib -- curl gets it
@@ -223,9 +262,12 @@ def _http_post_json(path: str, payload: dict) -> dict:
         with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
+        try:
+            body = e.read()
+        except Exception:  # noqa: BLE001 - an unreadable body must not hide the status
+            body = b""
         raise PlaybookError(
-            f"Playbook API POST {path} failed: HTTP {e.code}"
-            + (f" ({e.reason})" if getattr(e, "reason", None) else "")
+            _http_error_message("POST", path, e.code, body)
         ) from None
     except (http.client.IncompleteRead, http.client.RemoteDisconnected) as e:
         raise PlaybookError(
