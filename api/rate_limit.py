@@ -37,7 +37,14 @@ Behavior:
   changes, revisit. The 1 MiB body guard (request_size_guard.py) sits in
   front of this; order in main.py is body guard first.
 - State is in-process (free-tier boxes run one worker). Buckets prune their
-  own expired hits on every check, so memory is bounded by recent traffic.
+  expired hits on every check; keys whose newest hit is older than every
+  bucket window are swept once the map exceeds _KEY_CAP, so memory stays
+  bounded even under a key-flood (threat-8-adjacent resource exhaustion).
+- Bucket keys use the matched budget *prefix*, not the raw request path:
+  `/api/v1/installs/<anything>` shares the `/api/v1/installs` bucket, so a
+  flood of junk path variants cannot mint fresh buckets to dodge the limit
+  or grow the map (the middleware runs before route matching, so those
+  probes 404 downstream but still reach the limiter).
 """
 from __future__ import annotations
 
@@ -60,8 +67,17 @@ BUCKETS: dict[tuple[str, str], tuple[int, int]] = {
     ("POST", "/api/v1/accounts"): (10, 60),
 }
 
-# monotonic-time hits per "METHOD path-prefix client-ip" key
+# monotonic-time hits per "METHOD budget-prefix client-ip" key.
+# The key uses the matched budget prefix rather than the raw request path:
+# junk path variants under a budgeted prefix share one bucket instead of
+# minting fresh ones (the limiter runs before route matching).
 _hits: dict[str, list[float]] = {}
+
+# Once the map grows past this many keys, the next request sweeps keys whose
+# newest hit is older than every bucket window. 100k keys is low tens of MB;
+# without a cap, a junk-key flood (path variants, IP churn) could grow the
+# in-process map without bound on a free-tier box.
+_KEY_CAP = 100_000
 
 
 def _client_ip(request: Request) -> str:
@@ -79,14 +95,38 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _budget_for(method: str, path: str) -> tuple[int, int] | None:
-    """Longest path-prefix match for this method; None if not budgeted."""
-    best: tuple[int, int] | None = None
+def _matched(method: str, path: str) -> tuple[str, tuple[int, int]] | None:
+    """Longest-prefix (method, prefix) match; returns (prefix, budget)."""
+    best: tuple[str, tuple[int, int]] | None = None
     best_len = -1
     for (m, prefix), budget in BUCKETS.items():
         if m == method and path.startswith(prefix) and len(prefix) > best_len:
-            best, best_len = budget, len(prefix)
+            best, best_len = (prefix, budget), len(prefix)
     return best
+
+
+def _budget_for(method: str, path: str) -> tuple[int, int] | None:
+    """Longest path-prefix match for this method; None if not budgeted."""
+    matched = _matched(method, path)
+    return matched[1] if matched else None
+
+
+def _sweep(now: float) -> int:
+    """Delete keys whose newest hit predates every bucket window.
+
+    Returns the number of keys removed. Called only when the map exceeds
+    _KEY_CAP, so its O(n) scan is amortized across at least _KEY_CAP
+    requests. Never raises: a sweep must not break the request path.
+    """
+    try:
+        horizon = max((w for _, w in BUCKETS.values()), default=0)
+    except Exception:
+        return 0
+    cutoff = now - horizon
+    stale = [k for k, hits in _hits.items() if not hits or max(hits) <= cutoff]
+    for k in stale:
+        del _hits[k]
+    return len(stale)
 
 
 def _check(key: str, max_hits: int, window: float, now: float) -> float:
@@ -115,16 +155,14 @@ def _reset() -> None:
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        budget = (
-            _budget_for(request.method, path)
-            if path.startswith(_API_PREFIX)
-            else None
-        )
-        if budget is None:
+        matched = _matched(request.method, path) if path.startswith(_API_PREFIX) else None
+        if matched is None:
             return await call_next(request)
-        max_hits, window = budget
+        prefix, (max_hits, window) = matched
         now = _monotonic()
-        key = f"{request.method} {path} {_client_ip(request)}"
+        key = f"{request.method} {prefix} {_client_ip(request)}"
+        if len(_hits) > _KEY_CAP:
+            _sweep(now)
         retry_after = _check(key, max_hits, window, now)
         if retry_after > 0:
             return JSONResponse(

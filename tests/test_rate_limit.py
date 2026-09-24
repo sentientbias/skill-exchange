@@ -22,6 +22,7 @@ from api.rate_limit import (
     _check,
     _client_ip,
     _reset,
+    _sweep,
 )
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -291,3 +292,84 @@ def test_check_prunes_expired_hits():
     assert _check("k", 1, 60.0, now=0.0) == 0.0
     assert _check("k", 1, 60.0, now=61.0) == 0.0  # t=0 expired
     _reset()
+
+
+# ---------------------------------------------------------------------------
+# bucket-key hygiene (prefix keys + key sweep)
+# ---------------------------------------------------------------------------
+
+def test_path_variants_share_one_bucket():
+    # Junk path variants under a budgeted prefix must share the prefix's
+    # bucket: one IP can't mint fresh budgets (or fresh _hits keys) by
+    # appending path suffixes to a 404 probe. The limiter runs before route
+    # matching, so the probe still reaches it.
+    _reset()
+    saved = rl.BUCKETS.get(("POST", "/api/v1/installs"))
+    rl.BUCKETS[("POST", "/api/v1/installs")] = (1, 60)
+    real_clock = rl._monotonic
+    calls = {"i": 0}
+
+    def fake_monotonic():
+        calls["i"] += 1
+        return float(calls["i"])
+
+    rl._monotonic = fake_monotonic
+    try:
+        mw = RateLimitMiddleware(app=None)
+        r1 = _run(mw.dispatch(
+            Request(_scope("POST", "/api/v1/installs"),
+                    receive=_receive_factory([b"{}"])), _ok_next))
+        r2 = _run(mw.dispatch(
+            Request(_scope("POST", "/api/v1/installs/junk-xyz"),
+                    receive=_receive_factory([b"{}"])), _ok_next))
+        assert r1.status_code == 200
+        assert r2.status_code == 429  # same bucket as the real path
+        assert len(rl._hits) == 1
+    finally:
+        rl._monotonic = real_clock
+        if saved is None:
+            rl.BUCKETS.pop(("POST", "/api/v1/installs"), None)
+        else:
+            rl.BUCKETS[("POST", "/api/v1/installs")] = saved
+        _reset()
+
+
+def test_sweep_removes_fully_expired_keys():
+    # Keys whose newest hit predates every bucket window are dropped;
+    # keys with a live hit survive. (Production windows are 60s.)
+    _reset()
+    rl._hits["POST /api/v1/installs 203.0.113.7"] = [0.0]
+    rl._hits["POST /api/v1/accounts 203.0.113.8"] = [900.0, 950.0]
+    removed = _sweep(1000.0)
+    assert removed == 1
+    assert "POST /api/v1/installs 203.0.113.7" not in rl._hits
+    assert rl._hits["POST /api/v1/accounts 203.0.113.8"] == [900.0, 950.0]
+    _reset()
+
+
+def test_dispatch_triggers_sweep_past_cap():
+    # When the map exceeds _KEY_CAP, the next request sweeps stale keys
+    # before recording its own hit.
+    _reset()
+    rl._hits["POST /api/v1/installs 198.51.100.9"] = [0.0]  # stale
+    saved = rl.BUCKETS.get(("POST", "/api/v1/installs"))
+    rl.BUCKETS[("POST", "/api/v1/installs")] = (10, 60)
+    real_clock = rl._monotonic
+    real_cap = rl._KEY_CAP
+    rl._monotonic = lambda: 1000.0
+    rl._KEY_CAP = 0  # any non-empty map triggers the sweep
+    try:
+        mw = RateLimitMiddleware(app=None)
+        resp = _run(mw.dispatch(
+            Request(_scope("POST", "/api/v1/installs"),
+                    receive=_receive_factory([b"{}"])), _ok_next))
+        assert resp.status_code == 200
+        assert "POST /api/v1/installs 198.51.100.9" not in rl._hits
+    finally:
+        rl._KEY_CAP = real_cap
+        rl._monotonic = real_clock
+        if saved is None:
+            rl.BUCKETS.pop(("POST", "/api/v1/installs"), None)
+        else:
+            rl.BUCKETS[("POST", "/api/v1/installs")] = saved
+        _reset()

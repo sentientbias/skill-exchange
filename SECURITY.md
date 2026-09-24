@@ -163,7 +163,11 @@ a note explaining what to fix; resubmission is always allowed.
   existed before 2026-09-21 — leftmost XFF read — and is closed; the
   rightmost unforgeable hop is now the bucket key.) Counts should be read
   as rough popularity signal, not audited fact — install-time guidance
-  (verify the signature) stays the real trust anchor.
+  (verify the signature) stays the real trust anchor. Bucket keys use the
+  matched path prefix rather than the raw request path, and keys whose
+  newest hit predates every bucket window are swept once the map passes
+  100k entries, so junk path-variant probes and IP churn cannot grow the
+  limiter's memory without bound (threat-8-adjacent resource exhaustion).
 - **Determined human review evasion**: a cleverly obfuscated malicious skill
   can pass review. Mitigation is defense in depth (signatures + review +
   install-time skepticism), not any single layer.
