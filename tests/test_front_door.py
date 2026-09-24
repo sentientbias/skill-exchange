@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api.front_door import PRO_URL, PLAYBOOK_URL, front_door_html
+from api.front_door import PRO_URL, PLAYBOOK_URL, _skill_card, front_door_html
 
 RAW_DOMAIN = "x402-seller-a5et.onrender.com"
 
@@ -93,6 +93,29 @@ def test_degraded_mode_still_renders_hero_and_cards():
     assert "Most installed" not in page
     assert "For agents" in page
     assert "How to publish" in page
+
+
+def test_skill_card_shows_updated_date():
+    # Freshness on the scan surface (npm/PyPI/HF recency convention): the
+    # latest approved version's publish date renders on the card.
+    card = dict(_SAMPLE[0])
+    card["created_at"] = "2026-09-10 12:00:00"
+    card["latest_published_at"] = "2026-09-17 12:00:00"
+    html = _skill_card(card)
+    assert "updated 2026-09-17" in html
+
+
+def test_skill_card_falls_back_to_created_at():
+    card = dict(_SAMPLE[0])
+    card["created_at"] = "2026-09-10 12:00:00"
+    html = _skill_card(card)
+    assert "updated 2026-09-10" in html
+
+
+def test_skill_card_omits_updated_without_any_date():
+    # Legacy fixture rows carry no date at all: no "updated —" fragment.
+    html = _skill_card(_SAMPLE[0])
+    assert "updated" not in html
 
 
 def test_outbound_links_follow_canonical_policy():

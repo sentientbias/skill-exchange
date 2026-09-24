@@ -228,6 +228,16 @@ def skill_page_html(skill: dict) -> str:
     rating_count = int(skill.get("rating_count") or 0)
     downloads = int(skill.get("downloads") or 0)
     published = html.escape(_date(skill.get("created_at")))
+    # Freshness next to the byline (npm shows "Last published" on the
+    # package page): the latest approved version's publish date. Shown only
+    # when it differs from the first publish, so v1-only skills don't read
+    # "published X · updated X".
+    updated_raw = _date(skill.get("latest_published_at") or skill.get("created_at"))
+    updated_html = (
+        f" · updated {html.escape(updated_raw)}"
+        if updated_raw != published
+        else ""
+    )
 
     versions = skill.get("versions") or []
     version_rows = "".join(
@@ -338,7 +348,7 @@ code{{background:#f1f5f9;padding:1px 7px;border-radius:6px;font-size:13px}}
   <div class="crumbs"><a href="/">The Playbook</a> / skills / {slug}</div>
   <h1>{name} <span class="ver">v{version}</span></h1>
   <div class="cat"><a href="{category_href}">{category}</a></div>
-  <p class="meta">by {publisher} · published {published}</p>
+  <p class="meta">by {publisher} · published {published}{updated_html}</p>
   <p class="lede">{desc}</p>
   <div class="stats">
     <span><b>{downloads}</b> install{'s' if downloads != 1 else ''}</span>

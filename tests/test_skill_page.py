@@ -158,6 +158,30 @@ def test_detail_page_degrades_without_ratings_or_versions():
     assert "no ratings yet" in page
 
 
+def test_detail_page_shows_updated_when_newer_than_published():
+    # Freshness next to the byline, npm's "Last published" convention: the
+    # latest approved version's date renders when it differs from first
+    # publish.
+    skill = _full_skill()
+    skill["latest_published_at"] = "2026-09-17 12:00:00"
+    page = skill_page_html(skill)
+    assert "published 2026-09-17" in page
+    assert "updated 2026-09-17" not in page  # same day as created -> v1-only
+    skill["created_at"] = "2026-09-10 12:00:00"
+    page = skill_page_html(skill)
+    assert "published 2026-09-10" in page
+    assert "updated 2026-09-17" in page
+
+
+def test_detail_page_omits_updated_without_latest_published():
+    # Rows predating the latest_published_at column fall back to created_at,
+    # which equals published -- so no redundant "updated" fragment.
+    skill = _full_skill()
+    assert "latest_published_at" not in skill
+    page = skill_page_html(skill)
+    assert "updated" not in page
+
+
 def test_xss_content_is_escaped():
     skill = _full_skill()
     skill["name"] = '<script>alert(1)</script>'

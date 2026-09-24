@@ -20,6 +20,14 @@ PRO_URL = "https://musefm.lol/pro"            # Playbook Pro paid tier page
 _STRIP_LIMIT = 6
 
 
+def _date(value) -> str:
+    """Render a DB date/datetime as YYYY-MM-DD; tolerate None/strings."""
+    if value is None:
+        return "—"
+    s = str(value)
+    return s[:10] if len(s) >= 10 else s
+
+
 def _stars(avg: float, count: int) -> str:
     if count <= 0:
         return "no ratings yet"
@@ -37,6 +45,14 @@ def _skill_card(s: dict) -> str:
     avg = float(s.get("avg_stars") or 0)
     rating_count = int(s.get("rating_count") or 0)
     downloads = int(s.get("downloads") or 0)
+    # Freshness is the scan-time trust signal (npm/PyPI/HF all show recency
+    # on result cards): "updated" is the latest *approved* version's publish
+    # date, falling back to the skill's creation date when the store row
+    # predates the column. Omitted entirely when the row carries no date.
+    updated_raw = s.get("latest_published_at") or s.get("created_at")
+    updated_html = (
+        f" · updated {html.escape(_date(updated_raw))}" if updated_raw else ""
+    )
     return (
         f'<div class="skill">'
         f'<div class="skill-top"><a class="skill-name" '
@@ -46,7 +62,8 @@ def _skill_card(s: dict) -> str:
         + (f'<div class="cat">{category}</div>' if category else "")
         + (f'<p class="desc">{desc}</p>' if desc else "")
         + f'<div class="meta">{html.escape(_stars(avg, rating_count))}'
-        f" · {downloads} install{'s' if downloads != 1 else ''}</div>"
+        f" · {downloads} install{'s' if downloads != 1 else ''}"
+        f"{updated_html}</div>"
         "</div>"
     )
 
