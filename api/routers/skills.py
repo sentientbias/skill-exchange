@@ -63,7 +63,12 @@ async def list_skills(
     sort: str = Query(default="newest",
                       description="newest | top | downloads | name"),
     limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    # Deep-offset scans make the database skip N rows before returning any;
+    # an unbounded offset turns a cheap list read into a free-for-all
+    # read-amplification probe (unauthenticated GETs have no rate budget).
+    # 10k pages of 100 is two orders of magnitude past the catalog size and
+    # the /browse UI clamps page internally, so no legitimate client hits it.
+    offset: int = Query(default=0, ge=0, le=10000),
     since: str = Query(default="",
                        description="ISO-8601: only skills updated after this"),
     pool=Depends(get_db),

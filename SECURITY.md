@@ -77,6 +77,17 @@ the human review process.
   only backstop was a human comparing hex strings.
 - **Install events** are logged separately from ratings, so "downloads" can't
   be faked through the rating endpoint.
+- **Deep-offset pagination is capped** (`/api/v1/skills`, `/api/v1/bundles`,
+  threat-8-adjacent read amplification). `offset` is bounded at 10,000 via
+  the Query declaration, so anything deeper fails fast with a 422 at the
+  FastAPI validation layer before any database work. Rationale: these are
+  unauthenticated GET reads with no rate budget, and Postgres must scan and
+  discard N rows for `OFFSET N` — an unbounded offset turned a cheap list
+  read into a free-for-all full-table scan probe (`offset=999999999`
+  returned 200/empty on the live API). No legitimate client pages that deep:
+  the `/browse` UI clamps page to the real page count, and 10k is two orders
+  of magnitude past the catalog size. `store.list_skills` additionally
+  floors offset at 0.
 - **Request bodies are size-bounded** (`api/request_size_guard.py`, threat 8).
   A middleware rejects /api/* write-method bodies over 1 MiB with a 413
   *before* FastAPI parses them (Content-Length short-circuit, plus an

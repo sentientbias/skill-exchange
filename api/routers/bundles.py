@@ -69,7 +69,9 @@ async def list_bundles(
     q: str = Query(default="", description="Search name/description/slug"),
     category: str = Query(default=""),
     limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    # Same deep-offset guard as the /skills list endpoint (see its comment):
+    # unauthenticated GET reads have no rate budget, so cap the offset.
+    offset: int = Query(default=0, ge=0, le=10000),
     pool=Depends(get_db),
 ):
     """List install bundles for every approved skill (latest version each)."""
