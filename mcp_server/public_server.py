@@ -367,7 +367,8 @@ def _safe_slug(slug: str) -> str:
 # ---------------------------------------------------------------------------
 @mcp.tool()
 def search_skills(
-    query: str = "", category: str = "", sort: str = "newest", limit: int = 10
+    query: str = "", category: str = "", sort: str = "newest", limit: int = 10,
+    since: str = "",
 ) -> dict:
     """Search the Playbook's free skill catalog.
 
@@ -376,6 +377,9 @@ def search_skills(
         category: filter by category, e.g. "devtools", "writing", "media" ("" = all).
         sort: "newest" | "top" | "downloads" | "name".
         limit: how many results (1-50, default 10).
+        since: only skills updated after this -- "24h" | "7d" | "30d" |
+            ISO-8601 date ("" = no date filter). One call for
+            "what's new in category X".
 
     Returns {"skills": [...], "count": n} where count is the TOTAL number of
     matching skills in the catalog (page-independent) -- so "how many are
@@ -393,12 +397,15 @@ def search_skills(
     except (TypeError, ValueError):
         raise PlaybookError(f"Invalid limit {limit!r}: expected an integer") from None
     limit = max(1, min(50, limit))
+    since_iso = _parse_since(since) if (since or "").strip() else ""
 
     params: dict = {"sort": sort, "limit": limit, "offset": 0}
     if query:
         params["q"] = query
     if category:
         params["category"] = category
+    if since_iso:
+        params["since"] = since_iso
     data = _http_get_json("/api/v1/skills", params)
     items = data.get("items") or []
     # The API reports the page-independent match total; only fall back to
@@ -514,20 +521,32 @@ def _parse_since(since: str) -> str:
 
 
 @mcp.tool()
-def whats_new(since: str = "7d") -> dict:
+def whats_new(since: str = "7d", limit: int = 100) -> dict:
     """List skills approved recently, newest first.
 
     Args:
         since: "24h" | "7d" (default) | "30d" | an ISO-8601 date like "2026-09-14".
+        limit: results per page (1-100, default 100 -- the API max, so a
+            30d scan of an active catalog is not silently truncated).
 
-    Returns {"since": "<iso-8601 UTC>", "skills": [...], "count": n}.
+    Returns {"since": "<iso-8601 UTC>", "skills": [...], "count": n,
+             "returned": m} where count is the TOTAL number of matching
+    skills (page-independent) and returned is the size of this page.
     """
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        raise PlaybookError(f"Invalid limit {limit!r}: expected an integer") from None
+    limit = max(1, min(100, limit))
     iso = _parse_since(since)
     data = _http_get_json(
-        "/api/v1/skills", {"since": iso, "sort": "newest", "limit": 20, "offset": 0}
+        "/api/v1/skills", {"since": iso, "sort": "newest", "limit": limit, "offset": 0}
     )
     items = data.get("items") or []
-    return {"since": iso, "skills": items, "count": len(items)}
+    # The API reports the page-independent match total; only fall back to
+    # the page size against older API builds that don't send `total`.
+    total = data.get("total", len(items))
+    return {"since": iso, "skills": items, "count": total, "returned": len(items)}
 
 
 @mcp.tool()

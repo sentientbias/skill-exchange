@@ -186,7 +186,64 @@ def test_whats_new_parses_7d_to_iso():
     assert parsed.tzinfo is not None, "must be timezone-aware"
     expected = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
     assert abs((parsed - expected).total_seconds()) < 120
-    assert captured["sort"] == "newest" and captured["limit"] == 20
+    assert captured["sort"] == "newest" and captured["limit"] == 100
+
+
+def test_whats_new_count_is_total_not_page_size():
+    """count is the API's page-independent match total; returned is this page.
+
+    Previously count was len(items), so a 30d window with 135 matches and a
+    limit-20 page reported count=20 and silently dropped 115 skills.
+    """
+    payload = {"items": [{"slug": "a"}, {"slug": "b"}], "total": 135}
+
+    def fake(path, params=None):
+        return payload
+
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        result = ps.whats_new("30d")
+    assert result["count"] == 135
+    assert result["returned"] == 2
+    assert len(result["skills"]) == 2
+
+
+def test_whats_new_limit_clamped_to_api_max():
+    """A huge limit is clamped to 100 (the API's max) before the request."""
+    captured = {}
+
+    def fake(path, params=None):
+        captured.update(params or {})
+        return {"items": [], "total": 0}
+
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        ps.whats_new("7d", limit=9999)
+    assert captured["limit"] == 100
+
+
+def test_search_skills_since_filter_passed_through():
+    """since="7d" is parsed to ISO and sent to the API; empty stays absent."""
+    captured = {}
+
+    def fake(path, params=None):
+        captured.update(params or {})
+        return {"items": [], "total": 0}
+
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        ps.search_skills("", category="devtools", since="7d")
+    parsed = dt.datetime.fromisoformat(captured["since"])
+    expected = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
+    assert abs((parsed - expected).total_seconds()) < 120
+    assert captured["category"] == "devtools"
+
+    captured.clear()
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        ps.search_skills("")
+    assert "since" not in captured
+
+
+def test_search_skills_rejects_garbage_since():
+    with pytest.raises(PlaybookError, match="Invalid since"):
+        ps.search_skills("", since="yesterday-ish")
 
 
 def test_whats_new_rejects_garbage():
