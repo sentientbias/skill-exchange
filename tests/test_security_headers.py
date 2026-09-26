@@ -1,11 +1,12 @@
-"""Security response headers (nosniff, referrer policy, no framing).
+"""Security response headers (nosniff, referrer policy, no framing, CSP).
 
 Threat under test: the registry serves publisher-influenced bytes to
 browsers — HTML pages rendering escaped publisher markdown, raw SKILL.md
 as text/markdown inline, and zip bundles. api/security_headers.py stamps
-three guardrail headers on every response so a hostile byte sequence
-cannot be MIME-sniffed into a document or framed into a clickjacking
-overlay.
+four guardrail headers on every response so a hostile byte sequence
+cannot be MIME-sniffed into a document, framed into a clickjacking
+overlay, or (should escaping ever fail) executed as script — the pages
+ship no JavaScript at all, so script-src 'none' costs nothing.
 
 Run:  pytest tests/test_security_headers.py
 """
@@ -146,3 +147,17 @@ def test_route_set_header_is_not_clobbered():
     }
     assert headers["x-frame-options"] == "SAMEORIGIN"
     assert headers["x-content-type-options"] == "nosniff"
+
+
+def test_csp_disallows_all_scripts_but_keeps_self_styled_pages_working():
+    """The pages ship no JavaScript, so script-src 'none' is safe; inline
+    <style> blocks are the only in-page resources, so style-src must
+    permit 'unsafe-inline' or every page breaks visually."""
+    csp = _call()["headers"]["content-security-policy"]
+    directives = {d.split(" ", 1)[0]: d.split(" ", 1)[1] for d in csp.split("; ")}
+    assert directives["script-src"] == "'none'"
+    assert directives["object-src"] == "'none'"
+    assert directives["frame-ancestors"] == "'none'"
+    assert "'unsafe-inline'" in directives["style-src"]
+    assert directives["default-src"] == "'self'"
+    assert directives["form-action"] == "'self'"

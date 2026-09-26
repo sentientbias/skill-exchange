@@ -56,7 +56,21 @@ the human review process.
   `javascript:` URLs into another visitor's browser via a skill page.
 - **One rating per account per skill**, upserted on re-rate (limits casual
   ballot-stuffing; see residual risks).
-- **Security response headers on every response** (`api/security_headers.py`).
+- **Content-Security-Policy on every response** (`api/security_headers.py`,
+  stamped by the same outermost middleware as the guardrail headers).
+  The HTML pages ship no JavaScript at all — no `<script>` tags, no inline
+  event handlers, the browse search is a plain GET form — so the policy
+  sets `script-src 'none'` at zero functional cost: if an escaping bug ever
+  let publisher markup through the renderer, it still could not execute.
+  Inline `<style>` blocks are the only in-page resources (self-authored,
+  no external CSS/JS), so `style-src 'unsafe-inline'`; images are
+  self-hosted (`img-src 'self' data:`). `object-src 'none'`,
+  `frame-ancestors 'none'` (belt-and-braces with `X-Frame-Options: DENY`),
+  `base-uri 'self'`, and `form-action 'self'` close the remaining
+  plugin/framing/base-hijack vectors. Harmless on the JSON API and the
+  inert `text/markdown` / zip surfaces. Honest limit: `style-src
+  'unsafe-inline'` means CSP is not the layer that stops style injection —
+  the escape-first renderer is; CSP is the script/object backstop.
   The registry serves publisher-influenced bytes to browsers — HTML pages
   rendering escaped publisher markdown, raw SKILL.md served `inline` as
   `text/markdown`, and zip bundles. Every response (including short-circuited

@@ -9,7 +9,7 @@ surfaces:
   ``inline`` as ``text/markdown; charset=utf-8``.
 - GET /api/v1/bundles/{slug} — a zip of publisher content.
 
-This middleware stamps three cheap, reversible headers on every response
+This middleware stamps four cheap, reversible headers on every response
 (including short-circuited 413/429/422/404s — it is registered outermost so
 nothing escapes it):
 
@@ -26,6 +26,16 @@ nothing escapes it):
 - ``X-Frame-Options: DENY`` — the pages carry trust cues ("signature
   verified", download buttons). They must not be frameable, which is what
   clickjacking overlays abuse.
+- ``Content-Security-Policy`` — defense in depth behind the escape-first
+  renderer. The pages ship no JavaScript at all (no <script> tags, no
+  inline event handlers, the browse search is a plain GET form), so the
+  policy is ``script-src 'none'`` — if an escaping bug ever let publisher
+  markup through, it could not execute. Inline ``<style>`` blocks are the
+  only in-page resources and are self-authored, hence ``style-src
+  'unsafe-inline'``; images and the favicon are self-hosted (``img-src
+  'self' data:``). ``object-src 'none'`` and ``frame-ancestors 'none'``
+  close plugin and framing vectors outright; ``form-action 'self'`` pins
+  the browse search form to the registry itself.
 
 Why this is safe to apply globally: auth is bearer-header only (no
 cookies), so there is nothing for a framed or cross-origin context to
@@ -42,6 +52,16 @@ HEADERS: dict[str, str] = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Frame-Options": "DENY",
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'none'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self'; "
+        "img-src 'self' data:; "
+        "style-src 'unsafe-inline'"
+    ),
 }
 
 
