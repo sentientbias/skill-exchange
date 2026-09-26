@@ -1,28 +1,14 @@
 """Public skill browsing: list, search, detail, version download."""
 from __future__ import annotations
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
 
 from api.deps import get_db
+from api.query_params import validate_since
 from core import store
 
 router = APIRouter(tags=["skills"])
-
-
-def _validate_since(since: str) -> str:
-    """ISO-8601 gate for the `since` filter. Raises 422 on garbage so a
-    typo never silently returns the unfiltered catalog."""
-    try:
-        datetime.fromisoformat(since.replace("Z", "+00:00"))
-    except ValueError:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "since must be an ISO-8601 timestamp, e.g. 2026-09-14T00:00:00Z",
-        )
-    return since
 
 
 async def _raise_unknown_skill(slug: str, pool) -> None:
@@ -74,7 +60,7 @@ async def list_skills(
     pool=Depends(get_db),
 ):
     if since:
-        _validate_since(since)
+        validate_since(since)
     return {
         "items": await store.list_skills(
             pool, q=q, category=category, sort=sort, limit=limit,

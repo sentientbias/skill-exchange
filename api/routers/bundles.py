@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from api.deps import get_db
+from api.query_params import validate_since
 from api.routers.skills import _raise_unknown_skill, _raise_unknown_version
 from core import store
 
@@ -72,11 +73,21 @@ async def list_bundles(
     # Same deep-offset guard as the /skills list endpoint (see its comment):
     # unauthenticated GET reads have no rate budget, so cap the offset.
     offset: int = Query(default=0, ge=0, le=10000),
+    since: str = Query(default="",
+                       description="ISO-8601: only bundles updated after this"),
     pool=Depends(get_db),
 ):
-    """List install bundles for every approved skill (latest version each)."""
+    """List install bundles for every approved skill (latest version each).
+
+    `since` mirrors the /skills list filter: an agent update loop can poll
+    `?since=<last seen>` for bundles newer than its last check instead of
+    diffing the whole catalog.
+    """
+    if since:
+        validate_since(since)
     skills = await store.list_skills(
-        pool, q=q, category=category, sort="name", limit=limit, offset=offset
+        pool, q=q, category=category, sort="name", limit=limit, offset=offset,
+        since=since,
     )
     base = str(request.base_url).rstrip("/")
     items = []

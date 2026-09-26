@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import HTTPException
 
-from api.routers.skills import _validate_since
+from api.query_params import validate_since
 from core import store
 
 
@@ -40,15 +40,15 @@ def run(coro):
 # --- since validation -------------------------------------------------------
 
 def test_since_accepts_iso():
-    assert _validate_since("2026-09-14T00:00:00Z") == "2026-09-14T00:00:00Z"
-    assert _validate_since("2026-09-14T00:00:00+00:00")
-    assert _validate_since("2026-09-14")
+    assert validate_since("2026-09-14T00:00:00Z") == "2026-09-14T00:00:00Z"
+    assert validate_since("2026-09-14T00:00:00+00:00")
+    assert validate_since("2026-09-14")
 
 
 def test_since_rejects_garbage_with_422():
     for bad in ["yesterday", "2026-13-99", "'; DROP TABLE skills;--", ""]:
         try:
-            _validate_since(bad)
+            validate_since(bad)
         except HTTPException as e:
             assert e.status_code == 422, bad
         else:
