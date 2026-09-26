@@ -18,6 +18,7 @@ the human review process.
 | 7 | Key confusion | Attacker publishes under a lookalike handle |
 | 8 | Resource exhaustion via oversized payloads | Open or cheaply-reachable write endpoints (anonymous account signup, anonymous install logging, authenticated publishes) accept unbounded request bodies; FastAPI parses the whole JSON body into memory before any store-layer check, so a single huge POST spikes memory on a free-tier box |
 | 9 | Metric fabrication / Sybil registration via unthrottled anonymous endpoints | The anonymous endpoints (`POST /api/v1/installs`, `POST /api/v1/accounts`) had no rate limit: a single script could mint unlimited accounts (Sybil fuel for threat #5) or forge install events at will, inflating the `downloads` counts shown on the front door and per-skill detail pages. Downloads are client self-reported (PyPI instead derives them from CDN logs), so the count is only as honest as the cheapest writer |
+| 10 | Credential-bearing responses cached by intermediaries | `POST /api/v1/accounts` shows the new API key once in plaintext, `POST /api/v1/accounts/me/keys` shows a rotated key once, and `GET /api/v1/accounts/me/pro-passes` returns pro-pass bearer tokens. Anyone holding one of these values *is* the account. With no `Cache-Control` on any response, a shared proxy, CDN edge, or client HTTP cache retaining one of these responses leaks the credential to whoever can read the cache |
 
 ## Mitigations in this codebase
 
@@ -126,6 +127,21 @@ the human review process.
   across buckets, and shared-NAT clients share one budget; download counts
   remain client self-reported, which is why the residual-risk note below now
   names them.
+- **`Cache-Control: no-store` on credential-bearing responses**
+  (`api/no_store.py`, threat 10). Any request presenting an `Authorization`
+  header gets `no-store` on its response — covering the one-time plaintext
+  key display on `POST /api/v1/accounts/me/keys`, the pro-pass bearer
+  tokens on `GET /api/v1/accounts/me/pro-passes`, and every other
+  authenticated endpoint — plus the anonymous `POST /api/v1/accounts`
+  route, which returns the new key once and carries no Authorization
+  header. Bearer tokens are bearer: a cached copy *is* the credential, so
+  no shared proxy, edge, or client HTTP cache may retain these responses.
+  Public catalog JSON is deliberately left cacheable for future edge
+  caching; no legitimate client relies on HTTP caching of authenticated
+  responses. Honest limit: this stops the transport and intermediaries from
+  keeping a copy — it cannot stop the key holder's own client from saving
+  or logging the once-shown key, which remains the operator's
+  responsibility.
 
 ## The keypair flow (for publishers)
 

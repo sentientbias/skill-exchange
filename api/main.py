@@ -22,6 +22,7 @@ from api.browse_page import browse_error_html, browse_page_html
 from api.skill_page import skill_not_found_html, skill_page_html
 
 from .deps import get_db  # noqa: F401  (re-exported for routers)
+from .no_store import NoStoreOnCredentialsMiddleware
 from .query_guard import RejectUnknownQueryParamsMiddleware
 from .rate_limit import RateLimitMiddleware
 from .request_size_guard import RequestSizeGuardMiddleware
@@ -110,6 +111,13 @@ app.add_middleware(RateLimitMiddleware)
 # size guard: even short-circuited 429/413 responses carry the headers.
 # See api/security_headers.py for the threat rationale.
 app.add_middleware(SecurityHeadersMiddleware)
+
+# Credential-bearing responses must never sit in a cache (API keys shown
+# once at creation/rotation, pro-pass bearer tokens): stamp
+# Cache-Control: no-store on any response to a request that presented an
+# Authorization header, plus the anonymous account-creation route that
+# returns the plaintext key. Public catalog JSON stays cacheable.
+app.add_middleware(NoStoreOnCredentialsMiddleware)
 
 # Local brand assets (self-contained; the free service's face must not depend
 # on the paid service's uptime). Served from api/static, shipped in the image.
