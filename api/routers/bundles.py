@@ -67,8 +67,13 @@ def _build_zip(slug: str, ver: dict) -> bytes:
 @router.get("/bundles")
 async def list_bundles(
     request: Request,
-    q: str = Query(default="", description="Search name/description/slug"),
-    category: str = Query(default=""),
+    # Same search-text length bound as /api/v1/skills (see that endpoint's
+    # comment): q feeds three leading-wildcard ILIKE matches per row, so an
+    # unbounded q turned a cheap unauthenticated list read into an expensive
+    # full-table pattern scan with no rate budget.
+    q: str = Query(default="", max_length=200,
+                   description="Search name/description/slug"),
+    category: str = Query(default="", max_length=64),
     limit: int = Query(default=20, ge=1, le=100),
     # Same deep-offset guard as the /skills list endpoint (see its comment):
     # unauthenticated GET reads have no rate budget, so cap the offset.

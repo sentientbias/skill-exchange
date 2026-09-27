@@ -92,6 +92,19 @@ the human review process.
   only backstop was a human comparing hex strings.
 - **Install events** are logged separately from ratings, so "downloads" can't
   be faked through the rating endpoint.
+- **Search text on the public list endpoints is length-bounded** (`q` and
+  `category` on `/api/v1/skills` and `/api/v1/bundles`, threat-8-adjacent
+  read amplification). `q` feeds three leading-wildcard `ILIKE` matches
+  (`slug`, `name`, `description`) per row, so an unbounded search string
+  let a single client turn a cheap list read into an expensive full-table
+  pattern scan on unauthenticated endpoints with no rate budget (a 4000-char
+  `q` returned 200 on the live API, confirmed 2026-09-27). Oversized values
+  now fail fast with a 422 at the FastAPI validation layer before any
+  database work: `q` max 200 chars, `category` max 64. The `/browse` HTML
+  page already truncated `q` to 100 server-side, so the API caps follow
+  existing convention; no legitimate search exceeds them. Honest limit: this
+  is a cheap-request guard, not a rate limit — sustained request *volume*
+  against these endpoints is still unbudgeted.
 - **Deep-offset pagination is capped** (`/api/v1/skills`, `/api/v1/bundles`,
   threat-8-adjacent read amplification). `offset` is bounded at 10,000 via
   the Query declaration, so anything deeper fails fast with a 422 at the

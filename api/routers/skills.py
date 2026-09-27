@@ -44,8 +44,16 @@ async def _raise_unknown_version(slug: str, version: str, pool) -> None:
 
 @router.get("/skills")
 async def list_skills(
-    q: str = Query(default="", description="Search name/description/slug"),
-    category: str = Query(default=""),
+    # Search text is length-bounded before it reaches Postgres (threat-8-adjacent
+    # read amplification): q feeds three leading-wildcard ILIKE matches per
+    # row, so a multi-KB q string turned a cheap list read into an expensive
+    # full-table pattern scan on an unauthenticated endpoint with no rate
+    # budget (a 4000-char q returned 200 on the live API, confirmed 2026-09-27).
+    # 200 chars is generous for real searches; the /browse HTML page already
+    # truncates q to 100, and categories are short slugs capped at 64.
+    q: str = Query(default="", max_length=200,
+                   description="Search name/description/slug"),
+    category: str = Query(default="", max_length=64),
     sort: str = Query(default="newest",
                       description="newest | top | downloads | name"),
     limit: int = Query(default=20, ge=1, le=100),
