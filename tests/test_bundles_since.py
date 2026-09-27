@@ -65,7 +65,11 @@ def _run_list_bundles(since, monkeypatch):
         seen.update(kwargs)
         return rows
 
+    async def fake_count_skills(db, **kwargs):
+        return len(rows)
+
     monkeypatch.setattr(store, "list_skills", fake_list_skills)
+    monkeypatch.setattr(store, "count_skills", fake_count_skills)
     result = run(bundles.list_bundles(
         request=StubRequest(), q="", category="", limit=20, offset=0,
         since=since, pool=StubDB(),

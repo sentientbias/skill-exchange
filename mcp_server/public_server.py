@@ -550,6 +550,63 @@ def whats_new(since: str = "7d", limit: int = 100) -> dict:
 
 
 @mcp.tool()
+def list_bundles(
+    query: str = "", category: str = "", since: str = "", limit: int = 20,
+    offset: int = 0,
+) -> dict:
+    """List install bundles (latest version of each approved skill), for
+    agent update loops that poll for "what changed" without the catalog
+    noise.
+
+    Args:
+        query: keyword search across name/description ("" = everything).
+        category: filter by category, e.g. "devtools", "writing",
+            "media" ("" = all).
+        since: only bundles updated after this -- "24h" | "7d" | "30d" |
+            ISO-8601 date ("" = no date filter). Pair with offset to page
+            through a large update window.
+        limit: how many results (1-100, default 20, the API default).
+        offset: skip this many results (0-10000, default 0).
+
+    Returns {"since": "<iso-8601 UTC>" | "", "bundles": [...], "count": n,
+             "returned": m} where count is the TOTAL number of matching
+    bundles (page-independent) and returned is the size of this page.
+    Each bundle has slug, name, version, download_url, skill_md_url.
+    """
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        raise PlaybookError(f"Invalid limit {limit!r}: expected an integer") from None
+    limit = max(1, min(100, limit))
+    try:
+        offset = int(offset)
+    except (TypeError, ValueError):
+        raise PlaybookError(
+            f"Invalid offset {offset!r}: expected an integer"
+        ) from None
+    offset = max(0, min(10000, offset))
+    since_iso = _parse_since(since) if (since or "").strip() else ""
+
+    params: dict = {"limit": limit, "offset": offset}
+    if query:
+        params["q"] = query
+    if category:
+        params["category"] = category
+    if since_iso:
+        params["since"] = since_iso
+    data = _http_get_json("/api/v1/bundles", params)
+    items = data.get("items") or []
+    # The API reports the page-independent match total; only fall back to
+    # the page size against older API builds that don't send `total`.
+    return {
+        "since": since_iso,
+        "bundles": items,
+        "count": data.get("total", len(items)),
+        "returned": len(items),
+    }
+
+
+@mcp.tool()
 def get_stats() -> dict:
     """Registry totals: skill_count, total_downloads, publisher_count, categories.
 

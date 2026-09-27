@@ -109,7 +109,20 @@ async def list_bundles(
                 "skill_md_url": f"{base}/api/v1/skills/{s['slug']}/skill.md",
             }
         )
-    return {"items": items, "limit": limit, "offset": offset}
+    # Same page-independent match total as /api/v1/skills: a bundle update
+    # loop needs to know how many results exist to page through them with
+    # limit/offset. NOTE: count_skills counts matching skills with or
+    # without a published version; items above skips versionless skills,
+    # so total can run ahead of len(items) by the versionless count
+    # (near-zero in practice).
+    return {
+        "items": items,
+        "limit": limit,
+        "offset": offset,
+        "total": await store.count_skills(
+            pool, q=q, category=category, since=since,
+        ),
+    }
 
 
 @router.get("/bundles/{slug}")
