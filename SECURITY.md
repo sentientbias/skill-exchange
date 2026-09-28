@@ -140,6 +140,19 @@ the human review process.
   across buckets, and shared-NAT clients share one budget; download counts
   remain client self-reported, which is why the residual-risk note below now
   names them.
+- **Canonical slugs in client-visible names** (`api/routers/bundles.py`,
+  `api/routers/skills.py`). Zip entry paths, `Content-Disposition`
+  filenames, and the bundle receipt's `slug` are built from `ver["slug"]`
+  (the DB-canonical registry slug, selected as `s.slug` from the skills
+  table), never from the raw request path parameter. Today this is
+  defense in depth: the strict slug regex in `store._check_slug` (run
+  inside `get_version` before any response is built) already makes header
+  injection or path escape through a request slug unexploitable — but the
+  routers no longer rely on the store's regex. If the slug alphabet ever
+  widens, or a new download route forgets the check, a crafted slug
+  containing `"`, `;`, or CRLF can no longer land in a response header or
+  a zip entry path. Honest limit: the request slug remains the lookup
+  key; this only canonicalizes what is *emitted* back to the client.
 - **`Cache-Control: no-store` on credential-bearing responses**
   (`api/no_store.py`, threat 10). Any request presenting an `Authorization`
   header gets `no-store` on its response — covering the one-time plaintext

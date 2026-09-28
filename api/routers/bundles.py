@@ -27,6 +27,17 @@ router = APIRouter(tags=["bundles"])
 
 
 def _receipt(slug: str, ver: dict) -> dict:
+    # Defense in depth: the slug that goes into filenames and zip entries
+    # is the DB-canonical slug from the version row, never the raw request
+    # path parameter. Today's strict slug regex (^([a-z0-9][a-z0-9_-]{1,40})$)
+    # in store._check_slug makes header injection / path escape through the
+    # request slug unexploitable (get_version validates before any response
+    # is built), but the routers should not rely on the store's regex: if
+    # the slug alphabet ever widens (or a new route forgets the check), a
+    # crafted slug containing `"` / `;` / CRLF would land in the
+    # Content-Disposition filename and the zip entry paths. `ver["slug"]`
+    # comes from `select v.*, s.slug` -- the canonical registry slug.
+    slug = ver.get("slug") or slug
     return {
         "slug": slug,
         "version": ver["version"],
@@ -49,16 +60,20 @@ def _build_zip(slug: str, ver: dict) -> bytes:
     # store._d() normalizes the manifest to a dict at the DB boundary, so by
     # the time we get here it is always a JSON object (never a double-encoded
     # string). The `or {}` stays as cheap insurance for hand-built dicts.
+    # Zip entry paths use the DB-canonical slug (see _receipt for the
+    # rationale): zip entries land on the client's filesystem, so their
+    # directory names must not be built from request input.
+    canon = ver.get("slug") or slug
     manifest = ver.get("manifest") or {}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(f"{slug}/SKILL.md", ver["skill_md"])
+        zf.writestr(f"{canon}/SKILL.md", ver["skill_md"])
         zf.writestr(
-            f"{slug}/manifest.json",
+            f"{canon}/manifest.json",
             json.dumps(manifest, indent=2) + "\n",
         )
         zf.writestr(
-            f"{slug}/receipt.json", json.dumps(_receipt(slug, ver), indent=2) + "\n"
+            f"{canon}/receipt.json", json.dumps(_receipt(slug, ver), indent=2) + "\n"
         )
     buf.seek(0)
     return buf.read()
@@ -140,7 +155,12 @@ async def download_bundle(
             await _raise_unknown_skill(slug, pool)
         await _raise_unknown_version(slug, version or "latest", pool)
     data = _build_zip(slug, ver)
-    filename = f"{slug}-{ver['version']}.zip"
+    # Canonical slug for the download filename: ver["slug"] is the
+    # DB-canonical registry slug; the request slug is only a lookup key.
+    # Same defense-in-depth rationale as _receipt -- the filename reaches a
+    # header, so it must not be built from request input.
+    canon = ver.get("slug") or slug
+    filename = f"{canon}-{ver['version']}.zip"
     # Cache policy, npm-tarball convention: a published version row is
     # content-stable (UNIQUE version per skill, no UPDATE path on
     # skill_versions, the ed25519 signature covers slug+version+skill_md),

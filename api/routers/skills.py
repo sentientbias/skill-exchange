@@ -129,11 +129,14 @@ async def read_skill_md(slug: str, pool=Depends(get_db)):
     ver = await store.get_version(pool, slug, None)
     if ver is None:
         await _raise_unknown_skill(slug, pool)
+    # Filename from the DB-canonical slug (see bundles._receipt): the
+    # Content-Disposition header must not be built from request input.
+    canon = ver.get("slug") or slug
     return PlainTextResponse(
         ver["skill_md"],
         media_type="text/markdown; charset=utf-8",
         headers={
-            "Content-Disposition": f'inline; filename="{slug}-latest.md"',
+            "Content-Disposition": f'inline; filename="{canon}-latest.md"',
         },
     )
 
@@ -148,10 +151,13 @@ async def read_version_skill_md(slug: str, version: str, pool=Depends(get_db)):
         if skill is None:
             await _raise_unknown_skill(slug, pool)
         await _raise_unknown_version(slug, version, pool)
+    # Filename from the DB-canonical slug and version (see bundles._receipt).
+    canon = ver.get("slug") or slug
+    canon_ver = ver.get("version") or version
     return PlainTextResponse(
         ver["skill_md"],
         media_type="text/markdown; charset=utf-8",
         headers={
-            "Content-Disposition": f'inline; filename="{slug}-{version}.md"',
+            "Content-Disposition": f'inline; filename="{canon}-{canon_ver}.md"',
         },
     )
