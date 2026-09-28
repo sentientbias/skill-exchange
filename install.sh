@@ -28,8 +28,38 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 echo "==> fetching $SLUG v$VERSION from $API"
-curl -sSf -A "$UA" --max-time 60 \
-  "$API/api/v1/skills/$SLUG/versions/$VERSION" -o "$TMP/version.json"
+# --fail-with-body (curl 7.76+) keeps the registry's error body on HTTP
+# failures so a recoverable 404's hint ("did you mean ...?") reaches the
+# user instead of a bare curl 22. Older curls fall back to -f.
+CURL_FAIL_FLAG="-f"
+if curl --help all 2>/dev/null | grep -q -- "--fail-with-body"; then
+  CURL_FAIL_FLAG="--fail-with-body"
+fi
+if ! ERRBODY="$(curl -sS "$CURL_FAIL_FLAG" -A "$UA" --max-time 60 \
+  "$API/api/v1/skills/$SLUG/versions/$VERSION" -o "$TMP/version.json")"; then
+  HINT="$(printf '%s' "$ERRBODY" | python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.stdin.read())
+    det = d.get("detail")
+    if isinstance(det, dict):
+        msg = det.get("message", "")
+    elif isinstance(det, str):
+        msg = det
+    else:
+        msg = ""
+    if msg:
+        print(msg)
+except Exception:
+    pass' 2>/dev/null)"
+  echo "ERROR: could not fetch $SLUG v$VERSION from $API" >&2
+  if [ -n "${HINT:-}" ]; then
+    echo "  $HINT" >&2
+  else
+    echo "  (registry unreachable or the error was unreadable)" >&2
+  fi
+  exit 6
+fi
 
 echo "==> verifying ed25519 signature (fail closed)"
 python3 - "$TMP/version.json" "$SLUG" "$DEST" <<'PYEOF'
