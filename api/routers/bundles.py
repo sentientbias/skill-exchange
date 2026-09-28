@@ -141,8 +141,25 @@ async def download_bundle(
         await _raise_unknown_version(slug, version or "latest", pool)
     data = _build_zip(slug, ver)
     filename = f"{slug}-{ver['version']}.zip"
+    # Cache policy, npm-tarball convention: a published version row is
+    # content-stable (UNIQUE version per skill, no UPDATE path on
+    # skill_versions, the ed25519 signature covers slug+version+skill_md),
+    # so a pinned-version bundle stays valid forever and is safe to cache
+    # for a year, marked immutable. (The zip's receipt.json carries a
+    # request-time fetched_at and zip metadata embeds build timestamps, so
+    # bytes can vary slightly per request; the signed content does not.)
+    # An unpinned "latest" download resolves at request time and flips on
+    # the next publish, so it gets a short 5-minute public cache only.
+    # Headers only: no page, copy, API shape, or Pro-tier change.
+    cache_control = (
+        "public, max-age=31536000, immutable" if version
+        else "public, max-age=300"
+    )
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": cache_control,
+        },
     )
