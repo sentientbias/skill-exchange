@@ -132,11 +132,19 @@ async def read_skill_md(slug: str, pool=Depends(get_db)):
     # Filename from the DB-canonical slug (see bundles._receipt): the
     # Content-Disposition header must not be built from request input.
     canon = ver.get("slug") or slug
+    # Cache policy, npm-tarball convention (same as bundle downloads): the
+    # unpinned "latest" reader resolves at request time and flips on the
+    # next publish, so it gets a short 5-minute public cache only. The
+    # pinned-version reader below gets immutable + 1 year because a version
+    # row is content-stable (UNIQUE version per skill, no UPDATE path on
+    # skill_versions, the ed25519 signature covers slug+version+skill_md).
+    # Headers only: no page, copy, API shape, or Pro-tier change.
     return PlainTextResponse(
         ver["skill_md"],
         media_type="text/markdown; charset=utf-8",
         headers={
             "Content-Disposition": f'inline; filename="{canon}-latest.md"',
+            "Cache-Control": "public, max-age=300",
         },
     )
 
@@ -154,10 +162,17 @@ async def read_version_skill_md(slug: str, version: str, pool=Depends(get_db)):
     # Filename from the DB-canonical slug and version (see bundles._receipt).
     canon = ver.get("slug") or slug
     canon_ver = ver.get("version") or version
+    # Cache policy, npm-tarball convention (same as pinned bundle
+    # downloads): a version row is content-stable (UNIQUE version per
+    # skill, no UPDATE path on skill_versions, the ed25519 signature
+    # covers slug+version+skill_md), so this pinned read stays valid
+    # forever and is safe to cache for a year, marked immutable.
+    # Headers only: no page, copy, API shape, or Pro-tier change.
     return PlainTextResponse(
         ver["skill_md"],
         media_type="text/markdown; charset=utf-8",
         headers={
             "Content-Disposition": f'inline; filename="{canon}-{canon_ver}.md"',
+            "Cache-Control": "public, max-age=31536000, immutable",
         },
     )
