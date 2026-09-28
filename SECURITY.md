@@ -18,6 +18,7 @@ the human review process.
 | 7 | Key confusion | Attacker publishes under a lookalike handle |
 | 8 | Resource exhaustion via oversized payloads | Open or cheaply-reachable write endpoints (anonymous account signup, anonymous install logging, authenticated publishes) accept unbounded request bodies; FastAPI parses the whole JSON body into memory before any store-layer check, so a single huge POST spikes memory on a free-tier box |
 | 9 | Metric fabrication / Sybil registration via unthrottled anonymous endpoints | The anonymous endpoints (`POST /api/v1/installs`, `POST /api/v1/accounts`) had no rate limit: a single script could mint unlimited accounts (Sybil fuel for threat #5) or forge install events at will, inflating the `downloads` counts shown on the front door and per-skill detail pages. Downloads are client self-reported (PyPI instead derives them from CDN logs), so the count is only as honest as the cheapest writer |
+| 10 | Credential-bearing responses cached by intermediaries | `POST /api/v1/accounts` shows the new API key once in plaintext, `POST /api/v1/accounts/me/keys` shows a rotated key once, and `GET /api/v1/accounts/me/pro-passes` returns pro-pass bearer tokens. Anyone holding one of these values *is* the account. With no `Cache-Control` on any response, a shared proxy, CDN edge, or client HTTP cache retaining one of these responses leaks the credential to whoever can read the cache |
 
 ## Mitigations in this codebase
 
@@ -56,7 +57,21 @@ the human review process.
   `javascript:` URLs into another visitor's browser via a skill page.
 - **One rating per account per skill**, upserted on re-rate (limits casual
   ballot-stuffing; see residual risks).
-- **Security response headers on every response** (`api/security_headers.py`).
+- **Content-Security-Policy on every response** (`api/security_headers.py`,
+  stamped by the same outermost middleware as the guardrail headers).
+  The HTML pages ship no JavaScript at all — no `<script>` tags, no inline
+  event handlers, the browse search is a plain GET form — so the policy
+  sets `script-src 'none'` at zero functional cost: if an escaping bug ever
+  let publisher markup through the renderer, it still could not execute.
+  Inline `<style>` blocks are the only in-page resources (self-authored,
+  no external CSS/JS), so `style-src 'unsafe-inline'`; images are
+  self-hosted (`img-src 'self' data:`). `object-src 'none'`,
+  `frame-ancestors 'none'` (belt-and-braces with `X-Frame-Options: DENY`),
+  `base-uri 'self'`, and `form-action 'self'` close the remaining
+  plugin/framing/base-hijack vectors. Harmless on the JSON API and the
+  inert `text/markdown` / zip surfaces. Honest limit: `style-src
+  'unsafe-inline'` means CSP is not the layer that stops style injection —
+  the escape-first renderer is; CSP is the script/object backstop.
   The registry serves publisher-influenced bytes to browsers — HTML pages
   rendering escaped publisher markdown, raw SKILL.md served `inline` as
   `text/markdown`, and zip bundles. Every response (including short-circuited
@@ -77,6 +92,19 @@ the human review process.
   only backstop was a human comparing hex strings.
 - **Install events** are logged separately from ratings, so "downloads" can't
   be faked through the rating endpoint.
+- **Search text on the public list endpoints is length-bounded** (`q` and
+  `category` on `/api/v1/skills` and `/api/v1/bundles`, threat-8-adjacent
+  read amplification). `q` feeds three leading-wildcard `ILIKE` matches
+  (`slug`, `name`, `description`) per row, so an unbounded search string
+  let a single client turn a cheap list read into an expensive full-table
+  pattern scan on unauthenticated endpoints with no rate budget (a 4000-char
+  `q` returned 200 on the live API, confirmed 2026-09-27). Oversized values
+  now fail fast with a 422 at the FastAPI validation layer before any
+  database work: `q` max 200 chars, `category` max 64. The `/browse` HTML
+  page already truncated `q` to 100 server-side, so the API caps follow
+  existing convention; no legitimate search exceeds them. Honest limit: this
+  is a cheap-request guard, not a rate limit — sustained request *volume*
+  against these endpoints is still unbudgeted.
 - **Deep-offset pagination is capped** (`/api/v1/skills`, `/api/v1/bundles`,
   threat-8-adjacent read amplification). `offset` is bounded at 10,000 via
   the Query declaration, so anything deeper fails fast with a 422 at the
@@ -112,6 +140,21 @@ the human review process.
   across buckets, and shared-NAT clients share one budget; download counts
   remain client self-reported, which is why the residual-risk note below now
   names them.
+- **`Cache-Control: no-store` on credential-bearing responses**
+  (`api/no_store.py`, threat 10). Any request presenting an `Authorization`
+  header gets `no-store` on its response — covering the one-time plaintext
+  key display on `POST /api/v1/accounts/me/keys`, the pro-pass bearer
+  tokens on `GET /api/v1/accounts/me/pro-passes`, and every other
+  authenticated endpoint — plus the anonymous `POST /api/v1/accounts`
+  route, which returns the new key once and carries no Authorization
+  header. Bearer tokens are bearer: a cached copy *is* the credential, so
+  no shared proxy, edge, or client HTTP cache may retain these responses.
+  Public catalog JSON is deliberately left cacheable for future edge
+  caching; no legitimate client relies on HTTP caching of authenticated
+  responses. Honest limit: this stops the transport and intermediaries from
+  keeping a copy — it cannot stop the key holder's own client from saving
+  or logging the once-shown key, which remains the operator's
+  responsibility.
 
 ## The keypair flow (for publishers)
 

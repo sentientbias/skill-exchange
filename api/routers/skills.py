@@ -1,28 +1,14 @@
 """Public skill browsing: list, search, detail, version download."""
 from __future__ import annotations
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
 
 from api.deps import get_db
+from api.query_params import validate_since
 from core import store
 
 router = APIRouter(tags=["skills"])
-
-
-def _validate_since(since: str) -> str:
-    """ISO-8601 gate for the `since` filter. Raises 422 on garbage so a
-    typo never silently returns the unfiltered catalog."""
-    try:
-        datetime.fromisoformat(since.replace("Z", "+00:00"))
-    except ValueError:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "since must be an ISO-8601 timestamp, e.g. 2026-09-14T00:00:00Z",
-        )
-    return since
 
 
 async def _raise_unknown_skill(slug: str, pool) -> None:
@@ -58,8 +44,16 @@ async def _raise_unknown_version(slug: str, version: str, pool) -> None:
 
 @router.get("/skills")
 async def list_skills(
-    q: str = Query(default="", description="Search name/description/slug"),
-    category: str = Query(default=""),
+    # Search text is length-bounded before it reaches Postgres (threat-8-adjacent
+    # read amplification): q feeds three leading-wildcard ILIKE matches per
+    # row, so a multi-KB q string turned a cheap list read into an expensive
+    # full-table pattern scan on an unauthenticated endpoint with no rate
+    # budget (a 4000-char q returned 200 on the live API, confirmed 2026-09-27).
+    # 200 chars is generous for real searches; the /browse HTML page already
+    # truncates q to 100, and categories are short slugs capped at 64.
+    q: str = Query(default="", max_length=200,
+                   description="Search name/description/slug"),
+    category: str = Query(default="", max_length=64),
     sort: str = Query(default="newest",
                       description="newest | top | downloads | name"),
     limit: int = Query(default=20, ge=1, le=100),
@@ -74,7 +68,7 @@ async def list_skills(
     pool=Depends(get_db),
 ):
     if since:
-        _validate_since(since)
+        validate_since(since)
     return {
         "items": await store.list_skills(
             pool, q=q, category=category, sort=sort, limit=limit,

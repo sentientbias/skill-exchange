@@ -10,6 +10,11 @@
 # Flow: fetch the signed package -> VERIFY the ed25519 signature client-side
 # -> save SKILL.md -> report the install (feeds the registry download counter).
 #
+# The report is best-effort telemetry, matching the MCP installer's
+# fail-safe semantics: a registry outage never undoes a verified install
+# (exit 0 either way). Verification, by contrast, is mandatory and
+# fail-closed.
+#
 # Verification is mandatory. If pynacl is not available, this script FAILS
 # CLOSED rather than installing unverified bytes.
 set -euo pipefail
@@ -76,9 +81,14 @@ print(f"VERIFIED_OK version={version} path={md_path}")
 PYEOF
 
 echo "==> reporting install (feeds the download counter)"
+RESOLVED_VERSION="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("version") or "")' "$TMP/version.json" 2>/dev/null || true)"
+RESOLVED_VERSION="${RESOLVED_VERSION:-$VERSION}"
 RESP="$(curl -sS -A "$UA" --max-time 60 -X POST "$API/api/v1/installs" \
   -H 'Content-Type: application/json' \
-  -d "{\"slug\":\"$SLUG\",\"version\":\"$VERSION\",\"client\":\"install-sh/1.0\"}")"
-echo "$RESP" | grep -q '"ok":[ ]*true' \
-  && echo "==> done: installed $SLUG and reported the download" \
-  || { echo "WARNING: install saved but report failed: $RESP" >&2; exit 5; }
+  -d "{\"slug\":\"$SLUG\",\"version\":\"$RESOLVED_VERSION\",\"client\":\"install-sh/1.0\"}")"
+if echo "$RESP" | grep -q '"ok":[ ]*true'; then
+  echo "==> done: installed $SLUG $RESOLVED_VERSION and reported the download"
+else
+  echo "WARNING: install saved but the download-counter report failed: $RESP" >&2
+  echo "==> done: installed $SLUG $RESOLVED_VERSION (report not recorded; install is complete)"
+fi

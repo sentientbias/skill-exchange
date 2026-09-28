@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from api.deps import get_db
+from api.query_params import validate_since
 from api.routers.skills import _raise_unknown_skill, _raise_unknown_version
 from core import store
 
@@ -66,17 +67,32 @@ def _build_zip(slug: str, ver: dict) -> bytes:
 @router.get("/bundles")
 async def list_bundles(
     request: Request,
-    q: str = Query(default="", description="Search name/description/slug"),
-    category: str = Query(default=""),
+    # Same search-text length bound as /api/v1/skills (see that endpoint's
+    # comment): q feeds three leading-wildcard ILIKE matches per row, so an
+    # unbounded q turned a cheap unauthenticated list read into an expensive
+    # full-table pattern scan with no rate budget.
+    q: str = Query(default="", max_length=200,
+                   description="Search name/description/slug"),
+    category: str = Query(default="", max_length=64),
     limit: int = Query(default=20, ge=1, le=100),
     # Same deep-offset guard as the /skills list endpoint (see its comment):
     # unauthenticated GET reads have no rate budget, so cap the offset.
     offset: int = Query(default=0, ge=0, le=10000),
+    since: str = Query(default="",
+                       description="ISO-8601: only bundles updated after this"),
     pool=Depends(get_db),
 ):
-    """List install bundles for every approved skill (latest version each)."""
+    """List install bundles for every approved skill (latest version each).
+
+    `since` mirrors the /skills list filter: an agent update loop can poll
+    `?since=<last seen>` for bundles newer than its last check instead of
+    diffing the whole catalog.
+    """
+    if since:
+        validate_since(since)
     skills = await store.list_skills(
-        pool, q=q, category=category, sort="name", limit=limit, offset=offset
+        pool, q=q, category=category, sort="name", limit=limit, offset=offset,
+        since=since,
     )
     base = str(request.base_url).rstrip("/")
     items = []
@@ -93,7 +109,20 @@ async def list_bundles(
                 "skill_md_url": f"{base}/api/v1/skills/{s['slug']}/skill.md",
             }
         )
-    return {"items": items, "limit": limit, "offset": offset}
+    # Same page-independent match total as /api/v1/skills: a bundle update
+    # loop needs to know how many results exist to page through them with
+    # limit/offset. NOTE: count_skills counts matching skills with or
+    # without a published version; items above skips versionless skills,
+    # so total can run ahead of len(items) by the versionless count
+    # (near-zero in practice).
+    return {
+        "items": items,
+        "limit": limit,
+        "offset": offset,
+        "total": await store.count_skills(
+            pool, q=q, category=category, since=since,
+        ),
+    }
 
 
 @router.get("/bundles/{slug}")
@@ -112,8 +141,25 @@ async def download_bundle(
         await _raise_unknown_version(slug, version or "latest", pool)
     data = _build_zip(slug, ver)
     filename = f"{slug}-{ver['version']}.zip"
+    # Cache policy, npm-tarball convention: a published version row is
+    # content-stable (UNIQUE version per skill, no UPDATE path on
+    # skill_versions, the ed25519 signature covers slug+version+skill_md),
+    # so a pinned-version bundle stays valid forever and is safe to cache
+    # for a year, marked immutable. (The zip's receipt.json carries a
+    # request-time fetched_at and zip metadata embeds build timestamps, so
+    # bytes can vary slightly per request; the signed content does not.)
+    # An unpinned "latest" download resolves at request time and flips on
+    # the next publish, so it gets a short 5-minute public cache only.
+    # Headers only: no page, copy, API shape, or Pro-tier change.
+    cache_control = (
+        "public, max-age=31536000, immutable" if version
+        else "public, max-age=300"
+    )
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": cache_control,
+        },
     )

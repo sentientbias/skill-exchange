@@ -186,12 +186,145 @@ def test_whats_new_parses_7d_to_iso():
     assert parsed.tzinfo is not None, "must be timezone-aware"
     expected = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
     assert abs((parsed - expected).total_seconds()) < 120
-    assert captured["sort"] == "newest" and captured["limit"] == 20
+    assert captured["sort"] == "newest" and captured["limit"] == 100
+
+
+def test_whats_new_count_is_total_not_page_size():
+    """count is the API's page-independent match total; returned is this page.
+
+    Previously count was len(items), so a 30d window with 135 matches and a
+    limit-20 page reported count=20 and silently dropped 115 skills.
+    """
+    payload = {"items": [{"slug": "a"}, {"slug": "b"}], "total": 135}
+
+    def fake(path, params=None):
+        return payload
+
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        result = ps.whats_new("30d")
+    assert result["count"] == 135
+    assert result["returned"] == 2
+    assert len(result["skills"]) == 2
+
+
+def test_whats_new_limit_clamped_to_api_max():
+    """A huge limit is clamped to 100 (the API's max) before the request."""
+    captured = {}
+
+    def fake(path, params=None):
+        captured.update(params or {})
+        return {"items": [], "total": 0}
+
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        ps.whats_new("7d", limit=9999)
+    assert captured["limit"] == 100
+
+
+def test_search_skills_since_filter_passed_through():
+    """since="7d" is parsed to ISO and sent to the API; empty stays absent."""
+    captured = {}
+
+    def fake(path, params=None):
+        captured.update(params or {})
+        return {"items": [], "total": 0}
+
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        ps.search_skills("", category="devtools", since="7d")
+    parsed = dt.datetime.fromisoformat(captured["since"])
+    expected = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
+    assert abs((parsed - expected).total_seconds()) < 120
+    assert captured["category"] == "devtools"
+
+    captured.clear()
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        ps.search_skills("")
+    assert "since" not in captured
+
+
+def test_search_skills_rejects_garbage_since():
+    with pytest.raises(PlaybookError, match="Invalid since"):
+        ps.search_skills("", since="yesterday-ish")
 
 
 def test_whats_new_rejects_garbage():
     with pytest.raises(PlaybookError, match="Invalid since"):
         ps.whats_new("yesterday-ish")
+
+
+def _fake_bundles(payload=None):
+    captured = {}
+
+    def fake(path, params=None):
+        assert path == "/api/v1/bundles", path
+        captured.update(params or {})
+        return payload if payload is not None else {"items": [], "total": 0}
+
+    return fake, captured
+
+
+def test_list_bundles_params_passed_through():
+    """q/category/since/limit/offset reach the /api/v1/bundles endpoint;
+    since is parsed to ISO-8601 UTC like the other MCP tools."""
+    payload = {
+        "items": [{"slug": "a", "name": "A", "version": "1.0.0",
+                   "download_url": "u", "skill_md_url": "s"}],
+        "total": 42,
+    }
+    fake, captured = _fake_bundles(payload=payload)
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        result = ps.list_bundles(query="re", category="devtools", since="7d",
+                                 limit=25, offset=50)
+    assert captured["q"] == "re"
+    assert captured["category"] == "devtools"
+    parsed = dt.datetime.fromisoformat(captured["since"])
+    expected = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
+    assert abs((parsed - expected).total_seconds()) < 120
+    assert result["since"] == captured["since"]
+    assert captured["limit"] == 25
+    assert captured["offset"] == 50
+    assert result["count"] == 42, "count must be the API's page-independent total"
+    assert result["returned"] == 1
+    assert len(result["bundles"]) == 1
+
+
+def test_list_bundles_empty_since_stays_absent():
+    """Default call sends no since; nothing filtered."""
+    fake, captured = _fake_bundles()
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        result = ps.list_bundles()
+    assert "since" not in captured
+    assert "q" not in captured and "category" not in captured
+    assert result["since"] == ""
+
+
+def test_list_bundles_rejects_garbage_since():
+    with pytest.raises(PlaybookError, match="Invalid since"):
+        ps.list_bundles(since="yesterday-ish")
+
+
+def test_list_bundles_limits_clamped():
+    """limit is clamped to 1-100 and offset to 0-10000 before the request."""
+    fake, captured = _fake_bundles()
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        ps.list_bundles(limit=9999, offset=99999)
+    assert captured["limit"] == 100
+    assert captured["offset"] == 10000
+
+    fake, captured = _fake_bundles()
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        ps.list_bundles(limit=0, offset=-5)
+    assert captured["limit"] == 1
+    assert captured["offset"] == 0
+
+
+def test_list_bundles_count_falls_back_to_page_size():
+    """Against an older API build with no `total`, count is the page size."""
+    payload = {"items": [{"slug": "a"}, {"slug": "b"}]}
+    fake, _captured = _fake_bundles(payload=payload)
+    with mock.patch.object(ps, "_http_get_json", side_effect=fake):
+        result = ps.list_bundles()
+    assert result["count"] == 2
+    assert result["returned"] == 2
 
 
 def test_exits_with_clear_message_when_mcp_missing():
