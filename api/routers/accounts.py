@@ -1,6 +1,8 @@
 """Accounts and API keys."""
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.deps import account_write_budget, current_account, get_db, moderator
@@ -100,8 +102,15 @@ async def list_keys(account=Depends(current_account), pool=Depends(get_db)):
 
 @router.delete("/accounts/me/keys/{key_id}", status_code=status.HTTP_200_OK)
 async def revoke_key(
-    key_id: str, account=Depends(current_account), pool=Depends(get_db)
+    key_id: str, account=Depends(current_account), pool=Depends(get_db),
+    budget=Depends(account_write_budget),
 ):
+    # A malformed key_id is "no such key", not a 500: the store casts to
+    # uuid and asyncpg would raise on garbage. Validate at the boundary.
+    try:
+        uuid.UUID(key_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such key")
     ok = await store.revoke_api_key(pool, str(account["id"]), key_id)
     if not ok:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such key")

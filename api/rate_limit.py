@@ -82,10 +82,17 @@ BUCKETS: dict[tuple[str, str], tuple[int, int]] = {
 # the blast radius of a compromised key was unbounded. These budgets are
 # generous for legitimate human/machine use and bite only scripts.
 #
+# Key revocation (DELETE /api/v1/accounts/me/keys) is budgeted too: a
+# stolen key could otherwise nuke every other key on the account in
+# seconds (account lockout / scorched earth) while the victim's recovery
+# path -- minting replacement keys -- is itself throttled at 5/60 s.
+# Deleting more than a few keys a minute is never legitimate.
+#
 # (method, path prefix) -> (max hits, window seconds); longest-prefix match.
 ACCOUNT_BUCKETS: dict[tuple[str, str], tuple[int, int]] = {
     ("POST", "/api/v1/skills"): (30, 60),
     ("POST", "/api/v1/accounts/me/keys"): (5, 60),
+    ("DELETE", "/api/v1/accounts/me/keys"): (5, 60),
 }
 
 # monotonic-time hits per "acct METHOD budget-prefix account-id" key.

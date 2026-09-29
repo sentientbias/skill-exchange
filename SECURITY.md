@@ -150,7 +150,16 @@ the human review process.
   so there is no extra DB lookup) and charges one hit per account on a
   sliding window, keyed by longest-prefix match: `POST /api/v1/skills*`
   (new-skill publishes, new versions, ratings — one shared bucket) at
-  30 / 60 s, and `POST /api/v1/accounts/me/keys` (key minting) at 5 / 60 s.
+  30 / 60 s, `POST /api/v1/accounts/me/keys` (key minting) at 5 / 60 s,
+  and `DELETE /api/v1/accounts/me/keys/*` (key revocation) at 5 / 60 s.
+  The revocation budget closes a scorched-earth hole: without it, a
+  stolen key could delete every other key on the account in seconds
+  (account lockout) while the victim's recovery path — minting
+  replacement keys — is itself throttled. Deleting more than a few keys
+  a minute is never legitimate, so the budget bites only scripts. A
+  malformed `key_id` on the revoke route answers 404 "no such key" at
+  the API boundary (validated before the store's uuid cast) rather than
+  surfacing a 500.
   Over budget returns 429 + `Retry-After` before the route handler runs.
   Buckets live in their own in-process map with the same sweep-at-100k-keys
   discipline as the IP limiter. Moderator decision endpoints stay out of
