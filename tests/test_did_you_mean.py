@@ -14,6 +14,7 @@ Run:  pytest tests/test_did_you_mean.py
 import asyncio
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -137,7 +138,8 @@ def test_get_version_unknown_version_lists_available():
 
 def test_read_skill_md_404_suggests():
     db = ScriptedDB([None, _SLUG_ROWS])
-    exc = _http_404(skills_router.read_skill_md("regex-mastr", pool=db))
+    exc = _http_404(skills_router.read_skill_md(
+        request=SimpleNamespace(headers={}), slug="regex-mastr", pool=db))
     assert exc.detail["suggestions"] == ["regex-mastery"]
 
 

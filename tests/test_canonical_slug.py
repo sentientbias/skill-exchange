@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import zipfile
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -104,16 +105,18 @@ def test_bundle_receipt_carries_canonical_slug(monkeypatch):
 
 def test_skill_md_filename_uses_canonical_slug(monkeypatch):
     _stub_store(monkeypatch)
-    resp = run(skills_router.read_skill_md(slug=REQUEST_SLUG, pool=StubDB()))
+    resp = run(skills_router.read_skill_md(
+        request=SimpleNamespace(headers={}), slug=REQUEST_SLUG,
+        pool=StubDB()))
     cd = resp.headers["content-disposition"]
     assert cd == 'inline; filename="canonical-skill-latest.md"', cd
 
 
 def test_version_skill_md_filename_uses_canonical_slug(monkeypatch):
     _stub_store(monkeypatch)
-    resp = run(skills_router.read_version_skill_md(slug=REQUEST_SLUG,
-                                                   version="1.0.0",
-                                                   pool=StubDB()))
+    resp = run(skills_router.read_version_skill_md(
+        request=SimpleNamespace(headers={}), slug=REQUEST_SLUG,
+        version="1.0.0", pool=StubDB()))
     cd = resp.headers["content-disposition"]
     assert cd == 'inline; filename="canonical-skill-1.0.0.md"', cd
 

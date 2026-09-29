@@ -13,6 +13,7 @@ Stub-DB introspection style -- no live Postgres needed.
 import asyncio
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -22,6 +23,13 @@ from core import store
 
 class StubDB:
     pass
+
+
+def _req(if_none_match=None):
+    headers = {}
+    if if_none_match is not None:
+        headers["if-none-match"] = if_none_match
+    return SimpleNamespace(headers=headers)
 
 
 FAKE_VER = {
@@ -42,7 +50,8 @@ def _run_latest(monkeypatch):
         return dict(FAKE_VER)
 
     monkeypatch.setattr(store, "get_version", fake_get_version)
-    return run(skills.read_skill_md(slug="fake-skill", pool=StubDB()))
+    return run(skills.read_skill_md(request=_req(), slug="fake-skill",
+                                    pool=StubDB()))
 
 
 def _run_pinned(monkeypatch):
@@ -52,7 +61,7 @@ def _run_pinned(monkeypatch):
         return dict(FAKE_VER)
 
     monkeypatch.setattr(store, "get_version", fake_get_version)
-    return run(skills.read_version_skill_md(slug="fake-skill",
+    return run(skills.read_version_skill_md(request=_req(), slug="fake-skill",
                                             version="1.0.0", pool=StubDB()))
 
 
@@ -95,7 +104,8 @@ def test_unknown_slug_still_404s(monkeypatch):
     monkeypatch.setattr(store, "get_version", fake_get_version)
     monkeypatch.setattr(store, "suggest_slugs", fake_suggest_slugs)
     try:
-        run(skills.read_skill_md(slug="nope-skill", pool=StubDB()))
+        run(skills.read_skill_md(request=_req(), slug="nope-skill",
+                                 pool=StubDB()))
     except Exception as exc:  # HTTPException from _raise_unknown_skill
         assert getattr(exc, "status_code", None) == 404, (
             f"unknown slug must stay 404, got {exc!r}")
@@ -118,8 +128,8 @@ def test_unknown_version_still_404s(monkeypatch):
     monkeypatch.setattr(store, "list_version_labels",
                         fake_list_version_labels)
     try:
-        run(skills.read_version_skill_md(slug="fake-skill", version="9.9.9",
-                                         pool=StubDB()))
+        run(skills.read_version_skill_md(request=_req(), slug="fake-skill",
+                                         version="9.9.9", pool=StubDB()))
     except Exception as exc:  # HTTPException from _raise_unknown_version
         assert getattr(exc, "status_code", None) == 404, (
             f"unknown version must stay 404, got {exc!r}")
