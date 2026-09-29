@@ -134,12 +134,32 @@ the human review process.
   terminating proxy, appends its own observation to the right), else
   `request.client.host`. The previous leftmost read was a real bypass: a
   rotated forged prefix minted a fresh bucket per request. Authenticated
-  endpoints are deliberately not budgeted here: publishes and ratings are
-  already gated by API keys, signatures, and one-rating-per-account. Honest
-  limit: an adversary with many real egress IPs can still spread writes
+  *read* endpoints are deliberately not budgeted here: they are bearer-key
+  gated and the expensive ones already carry fast-fail validation caps.
+  Honest limit: an adversary with many real egress IPs can still spread writes
   across buckets, and shared-NAT clients share one budget; download counts
   remain client self-reported, which is why the residual-risk note below now
   names them.
+- **Per-account rate limits on authenticated writes**
+  (`api.rate_limit.ACCOUNT_BUCKETS`, `api.deps.account_write_budget`,
+  threat 6). The anonymous per-IP middleware runs before auth and never sees
+  these endpoints, so a stolen or abused API key previously had no rate
+  budget at all — one key could mint keys without limit, spam publishes into
+  the moderation queue (reviewer DoS), and machine-gun ratings. The
+  dependency runs after `current_account` (FastAPI caches the sub-dependency,
+  so there is no extra DB lookup) and charges one hit per account on a
+  sliding window, keyed by longest-prefix match: `POST /api/v1/skills*`
+  (new-skill publishes, new versions, ratings — one shared bucket) at
+  30 / 60 s, and `POST /api/v1/accounts/me/keys` (key minting) at 5 / 60 s.
+  Over budget returns 429 + `Retry-After` before the route handler runs.
+  Buckets live in their own in-process map with the same sweep-at-100k-keys
+  discipline as the IP limiter. Moderator decision endpoints stay out of
+  scope: moderator compromise is an operator problem, and throttling a
+  human reviewer mid-queue would be worse than the abuse it stops. Honest
+  limit: a legitimate publisher who scripts 30+ publishes in one minute —
+  nobody does — gets a 429 and retries; an attacker with many *accounts*
+  still spreads across budgets, but each account is a signup the anonymous
+  limiter already throttles.
 - **Canonical slugs in client-visible names** (`api/routers/bundles.py`,
   `api/routers/skills.py`). Zip entry paths, `Content-Disposition`
   filenames, and the bundle receipt's `slug` are built from `ver["slug"]`

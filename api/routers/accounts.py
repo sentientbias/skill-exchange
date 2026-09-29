@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from api.deps import current_account, get_db, moderator
+from api.deps import account_write_budget, current_account, get_db, moderator
 from api.schemas import (
     AccountCreate,
     AccountOut,
@@ -78,7 +78,8 @@ async def referrals_overview(
 @router.post("/accounts/me/keys", response_model=KeyOut,
              status_code=status.HTTP_201_CREATED)
 async def create_key(
-    body: KeyCreate, account=Depends(current_account), pool=Depends(get_db)
+    body: KeyCreate, account=Depends(current_account), pool=Depends(get_db),
+    budget=Depends(account_write_budget),
 ):
     """Mint an extra API key. Plaintext shown once."""
     key = await store.create_api_key(pool, str(account["id"]), body.name)

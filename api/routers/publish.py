@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, status
 
-from api.deps import current_account, get_db
+from api.deps import account_write_budget, current_account, get_db
 from api.schemas import SkillPublish, VersionPublish
 from core import store
 
@@ -15,6 +15,7 @@ async def publish_skill(
     body: SkillPublish,
     account=Depends(current_account),
     pool=Depends(get_db),
+    budget=Depends(account_write_budget),
 ):
     """Publish a new skill. Signature is verified server-side, then the skill
     enters the moderation queue (unless AUTO_APPROVE=true)."""
@@ -39,6 +40,7 @@ async def publish_version(
     body: VersionPublish,
     account=Depends(current_account),
     pool=Depends(get_db),
+    budget=Depends(account_write_budget),
 ):
     """Publish a new version of your own skill. Same verify + queue flow."""
     return await store.create_version(

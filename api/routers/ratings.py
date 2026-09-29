@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from api.deps import current_account, get_db
+from api.deps import account_write_budget, current_account, get_db
 from api.schemas import InstallIn, RatingIn
 from core import store
 
@@ -16,6 +16,7 @@ async def rate_skill(
     body: RatingIn,
     account=Depends(current_account),
     pool=Depends(get_db),
+    budget=Depends(account_write_budget),
 ):
     """Rate a skill 1-5 stars. Re-rating updates your previous rating."""
     return await store.rate_skill(

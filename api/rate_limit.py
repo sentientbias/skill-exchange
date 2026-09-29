@@ -11,9 +11,12 @@ With no throttle, a single script can:
   only as honest as the cheapest writer.
 
 This middleware applies a sliding-window budget per client IP to the anonymous
-write endpoints, before auth/deps run. Authenticated endpoints are not
-budgeted here: publish/rate calls are already gated by API keys + signatures,
-and per-account abuse there is an operator problem, not a free-for-all.
+write endpoints, before auth/deps run. Authenticated writes are budgeted
+separately, per account, via api.deps.account_write_budget (see
+ACCOUNT_BUCKETS below): a stolen or abused API key gets a budget too, not
+just anonymous callers. Moderator decision endpoints stay operator-side by
+design. Authenticated *reads* are not budgeted anywhere: they are bearer-key
+gated and the expensive ones already fail fast on validation.
 
 Behavior:
 - Budgets are keyed (HTTP method, path prefix), longest-prefix match:
@@ -66,6 +69,74 @@ BUCKETS: dict[tuple[str, str], tuple[int, int]] = {
     ("POST", "/api/v1/installs"): (30, 60),
     ("POST", "/api/v1/accounts"): (10, 60),
 }
+
+# Per-ACCOUNT budgets on authenticated writes. The middleware above runs
+# before auth (it never sees the account), so these live in a FastAPI
+# dependency (api.deps.account_write_budget) that runs after
+# current_account and calls check_account_budget below.
+#
+# Why: a stolen or abused API key (threat 6) previously had no rate budget
+# at all -- one key could mint keys without limit, spam publishes into the
+# moderation queue (reviewer DoS), and machine-gun ratings. The anonymous
+# IP limiter does not see these endpoints (they are all authenticated), so
+# the blast radius of a compromised key was unbounded. These budgets are
+# generous for legitimate human/machine use and bite only scripts.
+#
+# (method, path prefix) -> (max hits, window seconds); longest-prefix match.
+ACCOUNT_BUCKETS: dict[tuple[str, str], tuple[int, int]] = {
+    ("POST", "/api/v1/skills"): (30, 60),
+    ("POST", "/api/v1/accounts/me/keys"): (5, 60),
+}
+
+# monotonic-time hits per "acct METHOD budget-prefix account-id" key.
+_account_hits: dict[str, list[float]] = {}
+
+_ACCOUNT_KEY_CAP = 100_000
+
+
+def _account_matched(method: str, path: str) -> tuple[str, tuple[int, int]] | None:
+    """Longest-prefix ACCOUNT_BUCKETS match; returns (prefix, budget)."""
+    best: tuple[str, tuple[int, int]] | None = None
+    best_len = -1
+    for (m, prefix), budget in ACCOUNT_BUCKETS.items():
+        if m == method and path.startswith(prefix) and len(prefix) > best_len:
+            best, best_len = (prefix, budget), len(prefix)
+    return best
+
+
+def _account_sweep(now: float) -> int:
+    """Delete account-bucket keys whose newest hit predates every window."""
+    try:
+        horizon = max((w for _, w in ACCOUNT_BUCKETS.values()), default=0)
+    except Exception:
+        return 0
+    cutoff = now - horizon
+    stale = [k for k, hits in _account_hits.items() if not hits or max(hits) <= cutoff]
+    for k in stale:
+        del _account_hits[k]
+    return len(stale)
+
+
+def check_account_budget(account_id: str, method: str, path: str) -> float:
+    """Charge one hit against the per-account write budget.
+
+    Returns seconds until retry (0 if allowed). Raises nothing; the caller
+    (api.deps.account_write_budget) turns a nonzero return into a 429.
+    """
+    matched = _account_matched(method, path) if path.startswith(_API_PREFIX) else None
+    if matched is None:
+        return 0.0
+    prefix, (max_hits, window) = matched
+    now = _monotonic()
+    key = f"acct {method} {prefix} {account_id}"
+    if len(_account_hits) > _ACCOUNT_KEY_CAP:
+        _account_sweep(now)
+    return _check(key, max_hits, window, now, hits=_account_hits)
+
+
+def _reset_account() -> None:
+    """Test helper: clear per-account rate-limit state."""
+    _account_hits.clear()
 
 # monotonic-time hits per "METHOD budget-prefix client-ip" key.
 # The key uses the matched budget prefix rather than the raw request path:
@@ -129,21 +200,30 @@ def _sweep(now: float) -> int:
     return len(stale)
 
 
-def _check(key: str, max_hits: int, window: float, now: float) -> float:
-    """Record a hit; return seconds until retry (0 if allowed)."""
+def _check(
+    key: str, max_hits: int, window: float, now: float,
+    *, hits: dict[str, list[float]] | None = None,
+) -> float:
+    """Record a hit; return seconds until retry (0 if allowed).
+
+    `hits` is the backing map; callers that pass their own map get an
+    independent bucket keyspace (the per-account limiter uses its own).
+    Defaults to the anonymous limiter's module-level _hits.
+    """
+    store = _hits if hits is None else hits
     cutoff = now - window
-    hits = _hits.get(key)
-    if hits is None:
-        _hits[key] = [now]
+    store_hits = store.get(key)
+    if store_hits is None:
+        store[key] = [now]
         return 0.0
     # prune expired hits in place (keeps memory bounded by recent traffic)
-    fresh = [t for t in hits if t > cutoff]
+    fresh = [t for t in store_hits if t > cutoff]
     if len(fresh) >= max_hits:
         oldest = min(fresh)
-        _hits[key] = fresh  # already pruned; keep the window for retry math
+        store[key] = fresh  # already pruned; keep the window for retry math
         return max(1.0, window - (now - oldest))
     fresh.append(now)
-    _hits[key] = fresh
+    store[key] = fresh
     return 0.0
 
 
