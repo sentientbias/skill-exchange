@@ -247,12 +247,19 @@ async def search_skills(
     category: str = "",
     sort: str = "top",
     limit: int = 10,
+    offset: int = 0,
 ) -> dict:
     """Search the skill registry. Returns matching skills with ratings and
-    download counts. Sort: newest | top | downloads | name."""
+    download counts. Sort: newest | top | downloads | name.
+    Offset (0-10000, default 0) pages through results past the first page."""
+    try:
+        offset = int(offset)
+    except (TypeError, ValueError):
+        return {"error": f"invalid offset {offset!r}: expected an integer"}
+    offset = max(0, min(10000, offset))
     pool = await db.get_pool()
     items = await store.list_skills(
-        pool, q=query, category=category, sort=sort, limit=limit, offset=0
+        pool, q=query, category=category, sort=sort, limit=limit, offset=offset
     )
     return {"skills": _jsonable(items)}
 

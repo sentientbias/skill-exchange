@@ -368,7 +368,7 @@ def _safe_slug(slug: str) -> str:
 @mcp.tool()
 def search_skills(
     query: str = "", category: str = "", sort: str = "newest", limit: int = 10,
-    since: str = "",
+    since: str = "", offset: int = 0,
 ) -> dict:
     """Search the Playbook's free skill catalog.
 
@@ -380,6 +380,8 @@ def search_skills(
         since: only skills updated after this -- "24h" | "7d" | "30d" |
             ISO-8601 date ("" = no date filter). One call for
             "what's new in category X".
+        offset: skip this many results (0-10000, default 0). Pair with
+            count to page through the whole catalog.
 
     Returns {"skills": [...], "count": n} where count is the TOTAL number of
     matching skills in the catalog (page-independent) -- so "how many are
@@ -397,9 +399,16 @@ def search_skills(
     except (TypeError, ValueError):
         raise PlaybookError(f"Invalid limit {limit!r}: expected an integer") from None
     limit = max(1, min(50, limit))
+    try:
+        offset = int(offset)
+    except (TypeError, ValueError):
+        raise PlaybookError(
+            f"Invalid offset {offset!r}: expected an integer"
+        ) from None
+    offset = max(0, min(10000, offset))
     since_iso = _parse_since(since) if (since or "").strip() else ""
 
-    params: dict = {"sort": sort, "limit": limit, "offset": 0}
+    params: dict = {"sort": sort, "limit": limit, "offset": offset}
     if query:
         params["q"] = query
     if category:
