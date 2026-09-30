@@ -106,7 +106,7 @@ def test_bundle_receipt_carries_canonical_slug(monkeypatch):
 def test_skill_md_filename_uses_canonical_slug(monkeypatch):
     _stub_store(monkeypatch)
     resp = run(skills_router.read_skill_md(
-        request=SimpleNamespace(headers={}), slug=REQUEST_SLUG,
+        request=SimpleNamespace(headers={}, method="GET"), slug=REQUEST_SLUG,
         pool=StubDB()))
     cd = resp.headers["content-disposition"]
     assert cd == 'inline; filename="canonical-skill-latest.md"', cd
@@ -115,7 +115,7 @@ def test_skill_md_filename_uses_canonical_slug(monkeypatch):
 def test_version_skill_md_filename_uses_canonical_slug(monkeypatch):
     _stub_store(monkeypatch)
     resp = run(skills_router.read_version_skill_md(
-        request=SimpleNamespace(headers={}), slug=REQUEST_SLUG,
+        request=SimpleNamespace(headers={}, method="GET"), slug=REQUEST_SLUG,
         version="1.0.0", pool=StubDB()))
     cd = resp.headers["content-disposition"]
     assert cd == 'inline; filename="canonical-skill-1.0.0.md"', cd

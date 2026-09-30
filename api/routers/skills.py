@@ -154,7 +154,29 @@ def _if_none_match_matches(value: str | None, etag: str) -> bool:
     return False
 
 
-@router.get("/skills/{slug}/skill.md", response_class=PlainTextResponse)
+def _skill_md_head_response(body: str, filename: str, cache_control: str,
+                           etag: str) -> Response:
+    """HEAD answer for a skill.md read: same metadata as GET, no body.
+
+    Gives installer scripts and MCP fetch loops a cheap existence +
+    freshness probe (ETag and If-None-Match still apply) without
+    downloading the full markdown. Content-Length is the byte length of
+    the body the GET would have returned.
+    """
+    return Response(
+        status_code=200,
+        headers={
+            "Content-Type": "text/markdown; charset=utf-8",
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": cache_control,
+            "ETag": etag,
+            "Content-Length": str(len(body.encode("utf-8"))),
+        },
+    )
+
+
+@router.api_route("/skills/{slug}/skill.md", methods=["GET", "HEAD"],
+                  response_class=PlainTextResponse)
 async def read_skill_md(request: Request, slug: str, pool=Depends(get_db)):
     """Front-door reader: the latest approved SKILL.md as raw markdown.
 
@@ -182,6 +204,10 @@ async def read_skill_md(request: Request, slug: str, pool=Depends(get_db)):
         return Response(status_code=304,
                         headers={"ETag": etag,
                                  "Cache-Control": cache_control})
+    if request.method == "HEAD":
+        return _skill_md_head_response(ver["skill_md"],
+                                       f"{canon}-latest.md",
+                                       cache_control, etag)
     return PlainTextResponse(
         ver["skill_md"],
         media_type="text/markdown; charset=utf-8",
@@ -193,8 +219,9 @@ async def read_skill_md(request: Request, slug: str, pool=Depends(get_db)):
     )
 
 
-@router.get("/skills/{slug}/versions/{version}/skill.md",
-            response_class=PlainTextResponse)
+@router.api_route("/skills/{slug}/versions/{version}/skill.md",
+                  methods=["GET", "HEAD"],
+                  response_class=PlainTextResponse)
 async def read_version_skill_md(request: Request, slug: str, version: str,
                                 pool=Depends(get_db)):
     """Raw SKILL.md of one specific version, as markdown."""
@@ -221,6 +248,10 @@ async def read_version_skill_md(request: Request, slug: str, version: str,
         return Response(status_code=304,
                         headers={"ETag": etag,
                                  "Cache-Control": cache_control})
+    if request.method == "HEAD":
+        return _skill_md_head_response(ver["skill_md"],
+                                       f"{canon}-{canon_ver}.md",
+                                       cache_control, etag)
     return PlainTextResponse(
         ver["skill_md"],
         media_type="text/markdown; charset=utf-8",

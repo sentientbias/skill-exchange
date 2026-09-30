@@ -29,7 +29,7 @@ def _req(if_none_match=None):
     headers = {}
     if if_none_match is not None:
         headers["if-none-match"] = if_none_match
-    return SimpleNamespace(headers=headers)
+    return SimpleNamespace(headers=headers, method="GET")
 
 
 FAKE_VER = {

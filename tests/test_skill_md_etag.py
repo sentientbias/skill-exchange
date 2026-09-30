@@ -41,11 +41,11 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def _req(if_none_match=None):
+def _req(if_none_match=None, method="GET"):
     headers = {}
     if if_none_match is not None:
         headers["if-none-match"] = if_none_match
-    return SimpleNamespace(headers=headers)
+    return SimpleNamespace(headers=headers, method=method)
 
 
 def _run_latest(monkeypatch, if_none_match=None, version_row=None):
