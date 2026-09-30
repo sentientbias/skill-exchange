@@ -145,6 +145,7 @@ def test_read_skill_md_404_suggests():
 
 def test_bundle_404_suggests_on_unknown_slug():
     db = ScriptedDB([None, None, _SLUG_ROWS])
-    exc = _http_404(bundles_router.download_bundle("regex-mastr", None,
+    exc = _http_404(bundles_router.download_bundle(
+        SimpleNamespace(headers={}, method="GET"), "regex-mastr", None,
                                                    pool=db))
     assert exc.detail["suggestions"] == ["regex-mastery"]

@@ -16,11 +16,12 @@ import zipfile
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from api.deps import get_db
 from api.query_params import validate_since
-from api.routers.skills import _raise_unknown_skill, _raise_unknown_version
+from api.routers.skills import (_if_none_match_matches, _raise_unknown_skill,
+                                _raise_unknown_version, _skill_md_etag)
 from core import store
 
 router = APIRouter(tags=["bundles"])
@@ -140,8 +141,9 @@ async def list_bundles(
     }
 
 
-@router.get("/bundles/{slug}")
+@router.api_route("/bundles/{slug}", methods=["GET", "HEAD"])
 async def download_bundle(
+    request: Request,
     slug: str,
     version: str | None = Query(default=None,
                                 description="Pin a version; default latest"),
@@ -154,13 +156,13 @@ async def download_bundle(
         if skill is None:
             await _raise_unknown_skill(slug, pool)
         await _raise_unknown_version(slug, version or "latest", pool)
-    data = _build_zip(slug, ver)
     # Canonical slug for the download filename: ver["slug"] is the
     # DB-canonical registry slug; the request slug is only a lookup key.
     # Same defense-in-depth rationale as _receipt -- the filename reaches a
     # header, so it must not be built from request input.
     canon = ver.get("slug") or slug
-    filename = f"{canon}-{ver['version']}.zip"
+    canon_ver = ver.get("version") or "latest"
+    filename = f"{canon}-{canon_ver}.zip"
     # Cache policy, npm-tarball convention: a published version row is
     # content-stable (UNIQUE version per skill, no UPDATE path on
     # skill_versions, the ed25519 signature covers slug+version+skill_md),
@@ -180,11 +182,45 @@ async def download_bundle(
         if (version and version != "latest")
         else "public, max-age=300"
     )
+    # Strong ETag, same freshness convention as the skill.md readers: the
+    # DB-canonical slug + resolved version + the stored ed25519 signature
+    # (which binds slug+version+skill_md and changes with any content
+    # change). A 304 means "your cached copy of this exact signed content
+    # is still current" -- the request-time receipt metadata it skips is
+    # per-download bookkeeping, not content. The 304 path returns before
+    # the zip is ever built.
+    etag = _skill_md_etag(canon, canon_ver, ver.get("signature"))
+    if _if_none_match_matches(request.headers.get("if-none-match"), etag):
+        return Response(status_code=304,
+                        headers={"ETag": etag,
+                                 "Cache-Control": cache_control})
+    if request.method == "HEAD":
+        # Same metadata as GET, no body. The zip is NOT built here -- the
+        # freshness case is already covered by the 304 path above, so a
+        # bare HEAD is a pure existence + metadata probe with no
+        # server-side zip build. Gives installers and MCP fetch loops a
+        # cheap "is it there / did it change" check. Note there is
+        # deliberately NO Content-Length: the zip embeds request-time
+        # metadata (receipt.json fetched_at) whose deflate output is not
+        # byte-stable across requests (two consecutive builds measured
+        # 688 vs 687 bytes), so a length measured now could misdescribe
+        # the GET that follows. Omitting it is the honest choice.
+        return Response(
+            status_code=200,
+            headers={
+                "Content-Type": "application/zip",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": cache_control,
+                "ETag": etag,
+            },
+        )
+    data = _build_zip(slug, ver)
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/zip",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": cache_control,
+            "ETag": etag,
         },
     )

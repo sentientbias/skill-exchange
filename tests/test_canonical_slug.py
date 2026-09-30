@@ -30,6 +30,12 @@ class StubDB:
     pass
 
 
+class StubRequest:
+    def __init__(self, method="GET", headers=None):
+        self.method = method
+        self.headers = headers or {}
+
+
 # The request slug (lookup key) and the DB-canonical slug deliberately
 # differ -- this is the future/regression scenario the fix guards against.
 REQUEST_SLUG = 'weird"slug;x'
@@ -73,7 +79,7 @@ def _zip_body(resp):
 
 def test_bundle_filename_uses_canonical_slug(monkeypatch):
     _stub_store(monkeypatch)
-    resp = run(bundles.download_bundle(slug=REQUEST_SLUG, version="1.0.0",
+    resp = run(bundles.download_bundle(StubRequest(), slug=REQUEST_SLUG, version="1.0.0",
                                        pool=StubDB()))
     cd = resp.headers["content-disposition"]
     assert REQUEST_SLUG not in cd, (
@@ -83,7 +89,7 @@ def test_bundle_filename_uses_canonical_slug(monkeypatch):
 
 def test_bundle_zip_entries_use_canonical_slug(monkeypatch):
     _stub_store(monkeypatch)
-    resp = run(bundles.download_bundle(slug=REQUEST_SLUG, version="1.0.0",
+    resp = run(bundles.download_bundle(StubRequest(), slug=REQUEST_SLUG, version="1.0.0",
                                        pool=StubDB()))
     names = zipfile.ZipFile(io.BytesIO(_zip_body(resp))).namelist()
     assert names == [
@@ -95,7 +101,7 @@ def test_bundle_zip_entries_use_canonical_slug(monkeypatch):
 
 def test_bundle_receipt_carries_canonical_slug(monkeypatch):
     _stub_store(monkeypatch)
-    resp = run(bundles.download_bundle(slug=REQUEST_SLUG, version="1.0.0",
+    resp = run(bundles.download_bundle(StubRequest(), slug=REQUEST_SLUG, version="1.0.0",
                                        pool=StubDB()))
     zf = zipfile.ZipFile(io.BytesIO(_zip_body(resp)))
     receipt = json.loads(zf.read("canonical-skill/receipt.json"))
@@ -134,7 +140,7 @@ def test_request_slug_fallback_when_row_lacks_slug(monkeypatch):
 
     monkeypatch.setattr(store, "get_version", fake_get_version)
     monkeypatch.setattr(store, "get_skill", fake_get_skill)
-    resp = run(bundles.download_bundle(slug="fake-skill", version="1.0.0",
+    resp = run(bundles.download_bundle(StubRequest(), slug="fake-skill", version="1.0.0",
                                        pool=StubDB()))
     assert resp.headers["content-disposition"] == (
         'attachment; filename="fake-skill-1.0.0.zip"')

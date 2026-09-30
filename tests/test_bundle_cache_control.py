@@ -23,6 +23,16 @@ class StubDB:
     pass
 
 
+class StubRequest:
+    """Minimal request stub: method + plain-dict headers are all the
+    download route reads (method for the HEAD branch, if-none-match for
+    the 304 short-circuit)."""
+
+    def __init__(self, method="GET", headers=None):
+        self.method = method
+        self.headers = headers or {}
+
+
 FAKE_VER = {
     "version": "1.0.0",
     "skill_md": "# Fake Skill\n" + "x" * 60,
@@ -46,8 +56,8 @@ def _run_download(monkeypatch, version):
 
     monkeypatch.setattr(store, "get_version", fake_get_version)
     monkeypatch.setattr(store, "get_skill", fake_get_skill)
-    return run(bundles.download_bundle(slug="fake-skill", version=version,
-                                       pool=StubDB()))
+    return run(bundles.download_bundle(StubRequest(), slug="fake-skill",
+                                       version=version, pool=StubDB()))
 
 
 def test_pinned_version_bundle_is_immutable_cached(monkeypatch):
@@ -109,8 +119,8 @@ def test_unknown_version_still_404s(monkeypatch):
     monkeypatch.setattr(store, "list_version_labels",
                         fake_list_version_labels)
     try:
-        run(bundles.download_bundle(slug="fake-skill", version="2.0.0",
-                                    pool=StubDB()))
+        run(bundles.download_bundle(StubRequest(), slug="fake-skill",
+                                    version="2.0.0", pool=StubDB()))
     except Exception as exc:  # HTTPException from _raise_unknown_version
         assert getattr(exc, "status_code", None) == 404, (
             f"unknown version must stay 404, got {exc!r}")
