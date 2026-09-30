@@ -234,12 +234,16 @@ async def read_version_skill_md(request: Request, slug: str, version: str,
     # Filename from the DB-canonical slug and version (see bundles._receipt).
     canon = ver.get("slug") or slug
     canon_ver = ver.get("version") or version
-    cache_control = "public, max-age=31536000, immutable"
     # Cache policy, npm-tarball convention (same as pinned bundle
     # downloads): a version row is content-stable (UNIQUE version per
     # skill, no UPDATE path on skill_versions, the ed25519 signature
     # covers slug+version+skill_md), so this pinned read stays valid
     # forever and is safe to cache for a year, marked immutable.
+    # The "latest" alias floats: store.get_version resolves it at request
+    # time like an unpinned download, so it gets the short 5-minute
+    # public cache, not immutable.
+    cache_control = ("public, max-age=31536000, immutable"
+                     if version != "latest" else "public, max-age=300")
     # Headers only: no page, copy, API shape, or Pro-tier change.
     etag = _skill_md_etag(canon, canon_ver, ver.get("signature"))
     if _if_none_match_matches(request.headers.get("if-none-match"), etag):

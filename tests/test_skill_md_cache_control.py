@@ -113,6 +113,31 @@ def test_unknown_slug_still_404s(monkeypatch):
         raise AssertionError("unknown slug should raise, not return")
 
 
+def _run_pinned_latest_alias(monkeypatch):
+    # /versions/latest/skill.md: the path param is the floating alias;
+    # the store resolves it to 1.0.0 at request time.
+    async def fake_get_version(db, slug, ver):
+        assert slug == "fake-skill"
+        assert ver == "latest"
+        return dict(FAKE_VER)
+
+    monkeypatch.setattr(store, "get_version", fake_get_version)
+    return run(skills.read_version_skill_md(request=_req(), slug="fake-skill",
+                                            version="latest", pool=StubDB()))
+
+
+def test_versions_latest_alias_gets_short_cache_only(monkeypatch):
+    resp = _run_pinned_latest_alias(monkeypatch)
+    cc = resp.headers.get("cache-control", "")
+    assert "immutable" not in cc, (
+        f"versions/latest alias must NOT be immutable: {cc!r}")
+    assert "max-age=300" in cc, f"latest-alias reader max-age wrong: {cc!r}"
+    assert "public" in cc, f"latest-alias reader should be public: {cc!r}"
+    # The filename still names the resolved version, not the alias.
+    assert resp.headers["content-disposition"] == (
+        'inline; filename="fake-skill-1.0.0.md"'), resp.headers["content-disposition"]
+
+
 def test_unknown_version_still_404s(monkeypatch):
     async def fake_get_version(db, slug, ver):
         return None

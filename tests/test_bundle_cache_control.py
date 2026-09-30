@@ -82,6 +82,18 @@ def test_bundle_still_a_valid_zip_attachment(monkeypatch):
     assert body[:2] == b"PK", "bundle must still be a zip file"
 
 
+def test_explicit_latest_alias_bundle_gets_short_cache_only(monkeypatch):
+    # ?version=latest resolves at request time (store.get_version treats
+    # "latest" like None), so it floats with every publish and must not
+    # take the immutable branch.
+    resp = _run_download(monkeypatch, version="latest")
+    cc = resp.headers.get("cache-control", "")
+    assert "immutable" not in cc, (
+        f"explicit ?version=latest must NOT be immutable: {cc!r}")
+    assert "max-age=300" in cc, f"latest-alias bundle max-age wrong: {cc!r}"
+    assert "public" in cc, f"latest-alias bundle should be public: {cc!r}"
+
+
 def test_unknown_version_still_404s(monkeypatch):
     async def fake_get_version(db, slug, ver):
         return None

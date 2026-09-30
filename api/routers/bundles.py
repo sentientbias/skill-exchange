@@ -170,9 +170,14 @@ async def download_bundle(
     # bytes can vary slightly per request; the signed content does not.)
     # An unpinned "latest" download resolves at request time and flips on
     # the next publish, so it gets a short 5-minute public cache only.
+    # Note the explicit alias: store.get_version treats version="latest"
+    # exactly like version=None (it resolves to the latest approved
+    # version at request time), so an explicit ?version=latest is floating
+    # too and must take the short-cache branch, not the immutable one.
     # Headers only: no page, copy, API shape, or Pro-tier change.
     cache_control = (
-        "public, max-age=31536000, immutable" if version
+        "public, max-age=31536000, immutable"
+        if (version and version != "latest")
         else "public, max-age=300"
     )
     return StreamingResponse(
