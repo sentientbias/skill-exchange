@@ -1,7 +1,9 @@
 """Moderation queue (moderators only)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.deps import get_db, moderator
 from api.schemas import ModerateIn
@@ -35,6 +37,13 @@ async def decide(
     Approving a referred publisher's FIRST skill automatically converts their
     referral and issues the referrer a pro pass (see ``referral`` in the
     response)."""
+    # A malformed queue_id is "no such queue item", not a 500: the store
+    # casts to uuid and asyncpg would raise on garbage. Validate at the
+    # boundary (same pattern as DELETE /accounts/me/keys/{key_id}).
+    try:
+        uuid.UUID(queue_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such queue item")
     return await store.decide_moderation(
         pool, str(account["id"]), queue_id, body.approve, body.note
     )

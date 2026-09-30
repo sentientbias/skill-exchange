@@ -159,7 +159,10 @@ the human review process.
   a minute is never legitimate, so the budget bites only scripts. A
   malformed `key_id` on the revoke route answers 404 "no such key" at
   the API boundary (validated before the store's uuid cast) rather than
-  surfacing a 500.
+  surfacing a 500. The same boundary pattern guards
+  `POST /api/v1/moderation/queue/{queue_id}/decide` (2026-09-30): a
+  malformed `queue_id` answers 404 "no such queue item" at the API
+  boundary instead of raising inside asyncpg on the `::uuid` cast.
   Over budget returns 429 + `Retry-After` before the route handler runs.
   Buckets live in their own in-process map with the same sweep-at-100k-keys
   discipline as the IP limiter. Moderator decision endpoints stay out of
