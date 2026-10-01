@@ -113,10 +113,33 @@ def test_front_door_exact_match_budgeted():
 
 def test_front_door_exact_does_not_swallow_api_reads():
     # "/" as a prefix would match /api/v1/...; the exact match must not.
-    resp = _dispatch("GET", "/api/v1/skills", budget=None)
-    assert resp.status_code == 200
-    resp = _dispatch("GET", "/api/v1/accounts/me", budget=None)
-    assert resp.status_code == 200
+    # The API reads carry their OWN exact budget, not the front door's:
+    # exhaust the front-door bucket, then prove an API read still passes.
+    _reset()
+    mw = RateLimitMiddleware(app=None)
+    key = ("GET", "/")
+    saved = rl.EXACT_BUCKETS[key]
+    rl.EXACT_BUCKETS[key] = (2, 60)
+    try:
+        for _ in range(2):
+            scope = _scope("GET", "/")
+            resp = _run(mw.dispatch(Request(scope, _receive_factory()), _ok_next))
+            assert resp.status_code == 200
+        assert _run(mw.dispatch(
+            Request(_scope("GET", "/"), _receive_factory()), _ok_next)
+        ).status_code == 429
+        # The API list read has its own exact bucket -- still passing here.
+        resp = _run(mw.dispatch(
+            Request(_scope("GET", "/api/v1/skills"), _receive_factory()),
+            _ok_next))
+        assert resp.status_code == 200
+        # Authenticated reads are still deliberately unbudgeted.
+        resp = _run(mw.dispatch(
+            Request(_scope("GET", "/api/v1/accounts/me"), _receive_factory()),
+            _ok_next))
+        assert resp.status_code == 200
+    finally:
+        rl.EXACT_BUCKETS[key] = saved
 
 
 def test_head_shares_get_budget():

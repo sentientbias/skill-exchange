@@ -38,7 +38,19 @@ Behavior:
     GET  /feed.xml         -> 60 / 60 s per IP
     GET  /install.sh       -> 30 / 60 s per IP (one-shot download)
     GET  /playbook-mcp.py  -> 30 / 60 s per IP (one-shot download)
-  Every other /api/* route is untouched.
+    GET  /api/v1/skills/   -> 120 / 60 s per IP (skill detail, versions,
+    raw markdown readers; per-slug prefix)
+    GET  /api/v1/bundles/  -> 120 / 60 s per IP (bundle downloads -- a zip
+    is built per request, so volume is real CPU; per-slug prefix)
+    GET  /api/v1/skills    -> 120 / 60 s per IP (list, exact match)
+    GET  /api/v1/bundles   -> 120 / 60 s per IP (list, exact match)
+    GET  /api/v1/stats     -> 120 / 60 s per IP (stats, exact match)
+  Anonymous *reads* (HTML pages and the public JSON catalog/downloads)
+  carry human-speed volume budgets; authenticated API reads (bearer-key
+  gated, e.g. GET /api/v1/accounts/me) stay deliberately unbudgeted --
+  the middleware runs before auth and cannot distinguish them, but the
+  public-read paths are public anyway and the budgets are far above any
+  legitimate client's pace.
 - HEAD shares the GET budget (a HEAD request runs the same handler and DB
   work as GET; Starlette only strips the body, so letting it bypass the
   limiter would leave the hole open).
@@ -93,13 +105,24 @@ BUCKETS: dict[tuple[str, str], tuple[int, int]] = {
     ("GET", "/feed.xml"): (60, 60),
     ("GET", "/install.sh"): (30, 60),
     ("GET", "/playbook-mcp.py"): (30, 60),
+    # Anonymous API GETs (the per-slug reads, raw markdown readers, and
+    # bundle downloads): same human-speed budget as the pages. A bundle
+    # download builds a zip per request, so unbounded volume against it
+    # is real CPU work on a free-tier box -- same volume concern as the
+    # HTML renders, one coherent rule for anonymous GET volume.
+    ("GET", "/api/v1/skills/"): (120, 60),
+    ("GET", "/api/v1/bundles/"): (120, 60),
 }
 
 # Exact-path budgets. The front door needs one: "/" as a *prefix* would
 # swallow every route (including the authenticated API reads, which stay
-# deliberately unbudgeted), so it is exact-matched only.
+# deliberately unbudgeted), so it is exact-matched only. The bare list and
+# stats reads have no trailing-slash form, so they get exact buckets too.
 EXACT_BUCKETS: dict[tuple[str, str], tuple[int, int]] = {
     ("GET", "/"): (120, 60),
+    ("GET", "/api/v1/skills"): (120, 60),
+    ("GET", "/api/v1/bundles"): (120, 60),
+    ("GET", "/api/v1/stats"): (120, 60),
 }
 
 # Per-ACCOUNT budgets on authenticated writes. The middleware above runs

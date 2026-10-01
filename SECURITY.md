@@ -148,6 +148,17 @@ the human review process.
   handler and DB work, Starlette only strips the body). The front door
   `/` is exact-matched, not prefix-matched, so the budget cannot swallow
   the authenticated API reads, which stay deliberately unbudgeted.
+  Since 2026-10-01 the anonymous **API reads** carry the same 120 / 60 s
+  per-IP budget: `GET /api/v1/skills*`, `GET /api/v1/bundles*` (per-slug
+  prefix), and exact-matched `GET /api/v1/skills`, `GET /api/v1/bundles`,
+  `GET /api/v1/stats`. This closed the last anonymous-volume hole: the
+  JSON reads had per-request fast-fail caps but no volume budget, and a
+  bundle download builds a zip per request — real CPU on the free-tier
+  box — so one coherent rule now covers anonymous GET volume across HTML
+  pages, public JSON reads, and downloads. Authenticated API reads
+  (bearer-key gated) remain deliberately unbudgeted; the per-IP middleware
+  cannot distinguish them from public reads, but the budgets are human-
+  speed, so no legitimate client notices.
   Honest limit: an adversary with many real egress IPs can still spread writes
   across buckets, and shared-NAT clients share one budget; download counts
   remain client self-reported, which is why the residual-risk note below now

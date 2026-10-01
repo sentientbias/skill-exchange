@@ -148,9 +148,21 @@ def test_authenticated_writes_are_not_budgeted():
     assert _budget_for("POST", "/api/v1/skills/slug/ratings") is None
 
 
-def test_reads_are_not_budgeted():
+def test_anonymous_api_reads_are_budgeted():
+    # Anonymous GET volume is budgeted at human speed on the public reads:
+    # per-slug detail/raw-markdown/bundle paths by prefix, the bare list
+    # and stats reads by exact match. GET /api/v1/installs stays
+    # unbudgeted (there is no GET installs route; method-gated anyway).
     assert _budget_for("GET", "/api/v1/installs") is None
-    assert _budget_for("GET", "/api/v1/skills") is None
+    assert rl.EXACT_BUCKETS[("GET", "/api/v1/skills")] == (120, 60)
+    assert rl.EXACT_BUCKETS[("GET", "/api/v1/bundles")] == (120, 60)
+    assert rl.EXACT_BUCKETS[("GET", "/api/v1/stats")] == (120, 60)
+    assert _budget_for("GET", "/api/v1/skills/regex-mastery") == (120, 60)
+    assert _budget_for(
+        "GET", "/api/v1/skills/regex-mastery/skill.md") == (120, 60)
+    assert _budget_for("GET", "/api/v1/bundles/regex-mastery") == (120, 60)
+    # Authenticated API reads stay deliberately unbudgeted.
+    assert _budget_for("GET", "/api/v1/accounts/me") is None
 
 
 # ---------------------------------------------------------------------------
