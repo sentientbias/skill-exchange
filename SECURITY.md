@@ -136,6 +136,18 @@ the human review process.
   rotated forged prefix minted a fresh bucket per request. Authenticated
   *read* endpoints are deliberately not budgeted here: they are bearer-key
   gated and the expensive ones already carry fast-fail validation caps.
+  Since 2026-09-30 the anonymous **page GETs** carry budgets too: the
+  middleware's old `/api/` gate skipped the human-facing HTML pages
+  entirely, leaving the DB-backed renders (`GET /browse`, `GET
+  /skills/{slug}`, the front door, `/feed.xml`, `/install.sh`,
+  `/playbook-mcp.py`) unbudgeted against sustained-volume probes —
+  per-request caps (length-bounded `q`, clamped offsets) bounded each
+  request's cost but not the *volume*. Budgets are human-speed (120 / 60 s
+  for browse/skill pages and the front door, 60 for the feed, 30 for the
+  one-shot downloads); HEAD shares the GET budget (it runs the same
+  handler and DB work, Starlette only strips the body). The front door
+  `/` is exact-matched, not prefix-matched, so the budget cannot swallow
+  the authenticated API reads, which stay deliberately unbudgeted.
   Honest limit: an adversary with many real egress IPs can still spread writes
   across buckets, and shared-NAT clients share one budget; download counts
   remain client self-reported, which is why the residual-risk note below now

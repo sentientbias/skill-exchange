@@ -1,4 +1,4 @@
-"""Per-IP rate limiting on anonymous /api/* write endpoints (HTTP 429).
+"""Per-IP rate limiting on anonymous write endpoints and anonymous page GETs (HTTP 429).
 
 Threat: several write endpoints are reachable without any account — anonymous
 account signup (POST /accounts) and anonymous install logging (POST /installs).
@@ -10,13 +10,20 @@ With no throttle, a single script can:
   Playbook computes downloads from a client-callable counter, so the count is
   only as honest as the cheapest writer.
 
+The human-facing pages had the same hole in the other direction: the
+middleware's /api/ gate skipped them entirely, so a single client could hammer
+the DB-backed HTML renders (/browse, /skills/{slug}, the front door) with no
+budget at all. Those reads already carry per-request fast-fail caps
+(length-bounded q, clamped offsets), but sustained *volume* was unbudgeted.
+
 This middleware applies a sliding-window budget per client IP to the anonymous
-write endpoints, before auth/deps run. Authenticated writes are budgeted
-separately, per account, via api.deps.account_write_budget (see
-ACCOUNT_BUCKETS below): a stolen or abused API key gets a budget too, not
-just anonymous callers. Moderator decision endpoints stay operator-side by
-design. Authenticated *reads* are not budgeted anywhere: they are bearer-key
-gated and the expensive ones already fail fast on validation.
+write endpoints and the anonymous page GETs, before auth/deps run.
+Authenticated writes are budgeted separately, per account, via
+api.deps.account_write_budget (see ACCOUNT_BUCKETS below): a stolen or abused
+API key gets a budget too, not just anonymous callers. Moderator decision
+endpoints stay operator-side by design. Authenticated *reads* are not budgeted
+anywhere: they are bearer-key gated and the expensive ones already fail fast
+on validation.
 
 Behavior:
 - Budgets are keyed (HTTP method, path prefix), longest-prefix match:
@@ -24,7 +31,17 @@ Behavior:
     30/min is generous for one machine)
     POST /api/v1/accounts  -> 10 hits / 60 s per IP  (human-speed signup;
     still roomy for a classroom behind one NAT)
+    GET  /browse           -> 120 / 60 s per IP (human browsing speed;
+    bites scrapers and read-amplification probes, not people)
+    GET  /skills/          -> 120 / 60 s per IP (per-skill pages)
+    GET  /                 -> 120 / 60 s per IP (front door, exact match)
+    GET  /feed.xml         -> 60 / 60 s per IP
+    GET  /install.sh       -> 30 / 60 s per IP (one-shot download)
+    GET  /playbook-mcp.py  -> 30 / 60 s per IP (one-shot download)
   Every other /api/* route is untouched.
+- HEAD shares the GET budget (a HEAD request runs the same handler and DB
+  work as GET; Starlette only strips the body, so letting it bypass the
+  limiter would leave the hole open).
 - Over budget -> 429 JSON + Retry-After header (seconds until the oldest
   hit in the window expires).
 - Client IP is the RIGHTMOST X-Forwarded-For entry when present, else
@@ -68,6 +85,21 @@ _API_PREFIX = "/api/"
 BUCKETS: dict[tuple[str, str], tuple[int, int]] = {
     ("POST", "/api/v1/installs"): (30, 60),
     ("POST", "/api/v1/accounts"): (10, 60),
+    # Anonymous page GETs: the middleware's old /api/ gate skipped the
+    # human-facing HTML pages entirely, leaving the DB-backed renders
+    # unbudgeted. Human-speed budgets; scrapers and volume probes 429.
+    ("GET", "/browse"): (120, 60),
+    ("GET", "/skills/"): (120, 60),
+    ("GET", "/feed.xml"): (60, 60),
+    ("GET", "/install.sh"): (30, 60),
+    ("GET", "/playbook-mcp.py"): (30, 60),
+}
+
+# Exact-path budgets. The front door needs one: "/" as a *prefix* would
+# swallow every route (including the authenticated API reads, which stay
+# deliberately unbudgeted), so it is exact-matched only.
+EXACT_BUCKETS: dict[tuple[str, str], tuple[int, int]] = {
+    ("GET", "/"): (120, 60),
 }
 
 # Per-ACCOUNT budgets on authenticated writes. The middleware above runs
@@ -242,12 +274,20 @@ def _reset() -> None:
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        matched = _matched(request.method, path) if path.startswith(_API_PREFIX) else None
+        # HEAD costs the same server work as GET (the route handler runs and
+        # hits the DB; Starlette only strips the response body), so it shares
+        # the GET budget instead of bypassing the limiter.
+        method = "GET" if request.method == "HEAD" else request.method
+        matched = None
+        if (method, path) in EXACT_BUCKETS:
+            matched = (path, EXACT_BUCKETS[(method, path)])
+        else:
+            matched = _matched(method, path)
         if matched is None:
             return await call_next(request)
         prefix, (max_hits, window) = matched
         now = _monotonic()
-        key = f"{request.method} {prefix} {_client_ip(request)}"
+        key = f"{method} {prefix} {_client_ip(request)}"
         if len(_hits) > _KEY_CAP:
             _sweep(now)
         retry_after = _check(key, max_hits, window, now)
