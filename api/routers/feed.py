@@ -9,10 +9,13 @@ from datetime import datetime, timezone
 from email.utils import format_datetime
 from xml.sax.saxutils import escape
 
-from fastapi import APIRouter, Depends
+import hashlib
+
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 
 from api.deps import get_db
+from api.routers.skills import _if_none_match_matches
 from core import store
 
 router = APIRouter(tags=["feed"])
@@ -36,7 +39,7 @@ def _rfc2822(value) -> str:
 
 
 @router.get("/feed.xml")
-async def rss_feed(pool=Depends(get_db)):
+async def rss_feed(request: Request, pool=Depends(get_db)):
     skills = await store.list_skills(pool, sort="newest", limit=20)
     items: list[str] = []
     for s in skills:
@@ -67,4 +70,16 @@ async def rss_feed(pool=Depends(get_db)):
         + "\n  </channel>\n"
         "</rss>\n"
     )
-    return Response(content=body, media_type="application/rss+xml")
+    # Strong ETag over the exact rendered bytes, same freshness protocol
+    # as the skill.md readers and bundle downloads: feed pollers asking
+    # "did anything new publish?" get a 304 instead of a full re-parse.
+    # The feed changes only when skills publish, so a short 5-minute
+    # cache window is honest; per-IP budgets (60/60s) already apply.
+    etag = '"' + hashlib.sha256(body.encode("utf-8")).hexdigest() + '"'
+    cache_control = "public, max-age=300"
+    if _if_none_match_matches(request.headers.get("if-none-match"), etag):
+        return Response(status_code=304,
+                        headers={"ETag": etag,
+                                 "Cache-Control": cache_control})
+    return Response(content=body, media_type="application/rss+xml",
+                    headers={"ETag": etag, "Cache-Control": cache_control})
