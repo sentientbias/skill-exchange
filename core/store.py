@@ -39,6 +39,23 @@ def _check_slug(slug: str) -> None:
         raise ValueError("slug must match ^[a-z0-9][a-z0-9_-]{1,40}$")
 
 
+def _normalize_slug(slug: str) -> str:
+    """Case-insensitive slug lookup for READ paths (npm/PyPI convention).
+
+    Slugs are stored lowercase (publish validates strict lowercase), but
+    agents routinely request a slug in the wrong case ("Discord-Server-
+    Growth" after seeing the display name). Rejecting that with a 400
+    regex error is a dead end; lowercasing before validation turns it
+    into the skill. Signature safety is unaffected: canonical bytes use
+    the DB-canonical lowercase slug either way. WRITE paths (create_skill,
+    create_version, delist/relist) keep strict _check_slug so publishers
+    sign exactly what they publish.
+    """
+    slug = (slug or "").strip().lower()
+    _check_slug(slug)
+    return slug
+
+
 def _check_handle(handle: str) -> None:
     if not _HANDLE_RE.match(handle or ""):
         raise ValueError("handle must match ^[a-z0-9][a-z0-9_-]{1,30}$")
@@ -447,7 +464,7 @@ async def get_skill(
     db: asyncpg.Pool, slug: str, *, include_pending: bool = False
 ) -> dict[str, Any] | None:
     """Full skill detail: metadata, all versions, recent ratings."""
-    _check_slug(slug)
+    slug = _normalize_slug(slug)
     status_filter = "" if include_pending else "and s.status = 'approved'"
     row = await db.fetchrow(
         _LIST_SELECT + f"where s.slug = $1 {status_filter}", slug
@@ -483,7 +500,7 @@ async def get_version(
 
     version=None resolves to the latest approved version.
     """
-    _check_slug(slug)
+    slug = _normalize_slug(slug)
     status_filter = "" if include_pending else "and s.status = 'approved'"
     if version is None or version == "latest":
         row = await db.fetchrow(
@@ -512,6 +529,7 @@ async def suggest_slugs(
     sequence similarity. One cheap query over approved slugs; called only
     on the 404 path, never on the hot path.
     """
+    slug = (slug or "").strip().lower()
     rows = await db.fetch(
         "select slug from skills where status = 'approved'"
     )
@@ -529,6 +547,7 @@ async def list_version_labels(
     Powers the recoverable 404: a request for a version that doesn't
     exist gets the list of versions that do.
     """
+    slug = (slug or "").strip().lower()
     rows = await db.fetch(
         """select v.version from skill_versions v
            join skills s on s.id = v.skill_id
@@ -714,7 +733,7 @@ async def rate_skill(
     comment: str = "",
 ) -> dict[str, Any]:
     """Rate a skill (1-5). One rating per account per skill; re-rating updates."""
-    _check_slug(slug)
+    slug = _normalize_slug(slug)
     stars = int(stars)
     if stars < 1 or stars > 5:
         raise ValueError("stars must be 1-5")
