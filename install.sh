@@ -46,7 +46,12 @@ if curl --help all 2>/dev/null | grep -q -- "--fail-with-body"; then
 fi
 if ! ERRBODY="$(curl -sS "$CURL_FAIL_FLAG" -A "$UA" --max-time 60 \
   "$API/api/v1/skills/$SLUG/versions/$VERSION" -o "$TMP/version.json")"; then
-  HINT="$(printf '%s' "$ERRBODY" | python3 -c '
+  # --fail-with-body saves the error body into the -o file, NOT stdout, so
+  # ERRBODY is empty on modern curls: prefer the saved file, fall back to
+  # the captured stdout (older -f curls discard the body entirely).
+  ERRTEXT="$ERRBODY"
+  if [ -s "$TMP/version.json" ]; then ERRTEXT="$(cat "$TMP/version.json")"; fi
+  HINT="$(printf '%s' "$ERRTEXT" | python3 -c '
 import json, sys
 try:
     d = json.loads(sys.stdin.read())
