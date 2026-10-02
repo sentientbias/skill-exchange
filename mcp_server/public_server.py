@@ -465,7 +465,13 @@ def install_skill(slug: str, version: str = "latest", dest_dir: str = "") -> dic
     Returns {"path": ..., "version": ..., "verified": True,
              "reported": bool, "note": ...}.
     """
-    slug = _safe_slug(slug)
+    # Normalize like the server's read paths (strip + lowercase, npm/PyPI
+    # convention) since the 2026-10-01 case-insensitive lookup change.
+    # Without the lowercase, a mixed-case slug (copied from a display name)
+    # fetched fine but failed client-side signature verification against
+    # bytes the server signed with the canonical slug -- a false
+    # "SIGNATURE VERIFICATION FAILED" that scared users off good packages.
+    slug = _safe_slug(slug).lower()
     version = (version or "latest").strip() or "latest"
 
     ver = _http_get_json(
@@ -476,8 +482,13 @@ def install_skill(slug: str, version: str = "latest", dest_dir: str = "") -> dic
     signer_pubkey = ver.get("signer_pubkey") or ""
     resolved_version = ver.get("version") or ""
 
-    # Verify BEFORE touching the filesystem. Fail closed.
-    _verify_signature(slug, resolved_version, skill_md, signature, signer_pubkey)
+    # Verify BEFORE touching the filesystem. Fail closed. Prefer the
+    # response's canonical slug for the signed bytes (mirrors the server's
+    # own `ver.get("slug") or slug` idiom); the local slug is already
+    # normalized above, so this only diverges if server normalization
+    # ever changes out from under the client.
+    _verify_signature(ver.get("slug") or slug, resolved_version, skill_md,
+                      signature, signer_pubkey)
 
     dest = dest_dir.strip() if dest_dir else os.path.join(".", "skills", slug)
     os.makedirs(dest, exist_ok=True)

@@ -23,6 +23,15 @@ API="${SKILL_EXCHANGE_API:-https://skill-exchange-api-hoev.onrender.com}"
 SLUG="${1:?usage: $0 <slug> [version] [dest-dir]}"
 VERSION="${2:-latest}"
 DEST="${3:-$HOME/workspace/skills/installed}"
+# The server's read paths normalize slugs (strip + lowercase, npm/PyPI
+# convention) since the 2026-10-01 case-insensitive lookup change. Mirror the
+# lowercase here so a mixed-case slug (copied from a display name) fetches
+# fine and, critically, so verification below signs over the same canonical
+# slug the server signed with. Without this, `./install.sh My-Skill` fetched
+# OK (200) but failed verification with a scary false
+# "SIGNATURE VERIFICATION FAILED". The verify block below additionally
+# prefers the response's canonical slug when present (belt and braces).
+SLUG="$(printf '%s' "$SLUG" | tr 'A-Z' 'a-z')"
 UA="skill-exchange-install-sh/1.0"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -87,7 +96,12 @@ if not (skill_md and signature and pubkey and version):
           "version -- refusing to install", file=sys.stderr)
     sys.exit(3)
 
-canonical = f"{slug}\n{version}\n{skill_md}".encode("utf-8")
+# Use the response's canonical slug for the signature's canonical bytes,
+# not whatever case the caller typed: the server normalizes slugs on read
+# paths, and its signatures bind the canonical (lowercase) form. Fall back
+# to the argv slug for payloads that predate the field.
+canon_slug = ver.get("slug") or slug
+canonical = f"{canon_slug}\n{version}\n{skill_md}".encode("utf-8")
 try:
     VerifyKey(bytes.fromhex(pubkey.strip())).verify(
         canonical, base64.b64decode(signature.strip()))

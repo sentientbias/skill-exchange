@@ -27,7 +27,7 @@ VERSION = "1.2.3"
 SKILL_MD = "# test-skill\n\nA fake skill for tests.\n"
 
 
-def _make_version_json(skill_md=SKILL_MD, tamper=False):
+def _make_version_json(skill_md=SKILL_MD, tamper=False, slug_field=True):
     from nacl.signing import SigningKey
 
     sk = SigningKey.generate()
@@ -35,13 +35,18 @@ def _make_version_json(skill_md=SKILL_MD, tamper=False):
     sig = sk.sign(canonical).signature
     if tamper:
         sig = bytes(b ^ 0xFF for b in sig)  # flip every bit -> invalid
-    return {
+    payload = {
         "skill_md": skill_md,
         "signature": base64.b64encode(sig).decode(),
         "signer_pubkey": sk.verify_key.encode().hex(),
         "version": VERSION,
         "manifest": {"name": SLUG},
-    }, sk
+    }
+    if slug_field:
+        # The real server returns its canonical (lowercase) slug in the
+        # version JSON; installers prefer it for verification.
+        payload["slug"] = SLUG
+    return payload, sk
 
 
 def _mock_http(payload):
@@ -420,6 +425,69 @@ def test_install_skill_404_surfaces_available_versions(tmp_path):
             ps.install_skill(SLUG, "9.9.9", dest_dir=str(tmp_path))
     assert "available versions: 1.0.0" in str(exc.value)
     assert list(tmp_path.iterdir()) == [], "nothing may be written on failure"
+
+
+def test_install_mixed_case_slug_verifies(tmp_path):
+    """A mixed-case slug (copied from a display name) fetches fine since
+    the server normalizes on reads; verification must not false-fail on
+    the case the caller typed. Regression: before the fix this raised
+    SIGNATURE VERIFICATION FAILED even though the package was good."""
+    payload, _ = _make_version_json()
+    with _mock_http_with_report(payload):
+        result = ps.install_skill("Test-Skill", VERSION,
+                                  dest_dir=str(tmp_path))
+    assert result["verified"] is True
+    assert result["version"] == VERSION
+    md_path = os.path.join(str(tmp_path), "SKILL.md")
+    with open(md_path, encoding="utf-8") as fh:
+        assert fh.read() == SKILL_MD
+
+
+def test_install_mixed_case_slug_falls_back_without_slug_field(tmp_path):
+    """Payloads without the server's `slug` field verify against the
+    client-normalized (lowercased) argv slug."""
+    payload, _ = _make_version_json(slug_field=False)
+    with _mock_http_with_report(payload):
+        result = ps.install_skill("Test-Skill", VERSION,
+                                  dest_dir=str(tmp_path))
+    assert result["verified"] is True
+
+
+def test_install_mixed_case_default_dest_is_canonical(tmp_path,
+                                                      monkeypatch):
+    """Two installs of the same skill under different case must land in
+    one canonical directory, not two sibling dirs."""
+    payload, _ = _make_version_json()
+    monkeypatch.chdir(tmp_path)
+    with _mock_http_with_report(payload):
+        result = ps.install_skill("Test-Skill", VERSION, dest_dir="")
+    expected = os.path.join(str(tmp_path), "skills", SLUG, "SKILL.md")
+    assert os.path.abspath(result["path"]) == expected
+    with open(expected, encoding="utf-8") as fh:
+        assert fh.read() == SKILL_MD
+
+
+def test_install_prefers_response_slug_for_verification(tmp_path):
+    """Verification uses the response's canonical slug when present; the
+    client-normalized slug is the fallback. Pins the precedence so a
+    future server-side normalization change cannot false-fail installs."""
+    from nacl.signing import SigningKey
+
+    renamed = "renamed-skill"
+    sk = SigningKey.generate()
+    canonical = f"{renamed}\n{VERSION}\n{SKILL_MD}".encode("utf-8")
+    sig = sk.sign(canonical).signature
+    payload = {
+        "skill_md": SKILL_MD,
+        "signature": base64.b64encode(sig).decode(),
+        "signer_pubkey": sk.verify_key.encode().hex(),
+        "version": VERSION,
+        "slug": renamed,
+        "manifest": {},
+    }
+    with _mock_http_with_report(payload):
+        result = ps.install_skill(SLUG, VERSION, dest_dir=str(tmp_path))
+    assert result["verified"] is True
 
 
 if __name__ == "__main__":
