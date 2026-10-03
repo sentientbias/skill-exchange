@@ -33,9 +33,28 @@ async def record_install(body: InstallIn, pool=Depends(get_db)):
     """
     ver = await store.get_version(pool, body.slug, body.version)
     if ver is None:
+        # get_version returns None for two different problems and they need
+        # different recoveries. A skill with at least one approved version
+        # always has version labels, so an empty label list means the skill
+        # itself is unknown: answer with the same did-you-mean shape as the
+        # read endpoints instead of a misleading "no version" message.
+        available = await store.list_version_labels(pool, body.slug)
+        if not available:
+            suggestions = await store.suggest_slugs(pool, body.slug)
+            message = f"no skill '{body.slug}'"
+            if suggestions:
+                quoted = ", ".join(f"'{s}'" for s in suggestions)
+                message += f"; did you mean: {quoted}?"
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                {"message": message, "suggestions": suggestions},
+            )
+        message = f"no version '{body.version}' of '{body.slug}'"
+        if available:
+            message += f"; available versions: {', '.join(available)}"
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            f"no version '{body.version}' of '{body.slug}'",
+            {"message": message, "available_versions": available},
         )
     await store.record_install(pool, str(ver["id"]), None, body.client)
     return {"ok": True, "slug": body.slug, "version": ver["version"]}
