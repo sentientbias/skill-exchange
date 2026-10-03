@@ -83,3 +83,92 @@ async def rss_feed(request: Request, pool=Depends(get_db)):
                                  "Cache-Control": cache_control})
     return Response(content=body, media_type="application/rss+xml",
                     headers={"ETag": etag, "Cache-Control": cache_control})
+
+
+SITEMAP_MAX_URLS = 5000
+
+
+def _iso_date(value):
+    """Coerce a DB timestamp into a YYYY-MM-DD sitemap <lastmod> string.
+
+    Returns None when the value is missing or unparseable, in which case
+    the <url> entry is emitted without <lastmod> rather than with a lie.
+    """
+    dt: datetime
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+    return dt.date().isoformat()
+
+
+@router.get("/sitemap.xml")
+async def sitemap(request: Request, pool=Depends(get_db)):
+    """Public sitemap.xml: every approved skill's human-readable page.
+
+    Search engines and discovery crawlers (npm, PyPI, and Hugging Face all
+    publish one) can find the skill pages without hammering /browse or the
+    list API page by page. Emits the front door, /browse, and up to
+    SITEMAP_MAX_URLS approved skill pages; nothing about the page renders
+    changes, this is a new machine-readable surface only.
+    """
+    urls: list[str] = [
+        f"    <url><loc>{BASE_URL}/</loc></url>",
+        f"    <url><loc>{BASE_URL}/browse</loc></url>",
+    ]
+    # store.list_skills clamps each request to 100 rows (per-request cost
+    # bound), so walk offset pages until the page comes back short or the
+    # sitemap cap is reached.
+    offset = 0
+    while len(urls) - 2 < SITEMAP_MAX_URLS:
+        page = await store.list_skills(pool, sort="newest", limit=100,
+                                       offset=offset)
+        if not page:
+            break
+        for s in page:
+            slug = escape(str(s.get("slug", "")))
+            lastmod = _iso_date(s.get("updated_at"))
+            lastmod_tag = f"<lastmod>{lastmod}</lastmod>" if lastmod else ""
+            urls.append(
+                f"    <url><loc>{BASE_URL}/skills/{slug}</loc>{lastmod_tag}</url>"
+            )
+        if len(page) < 100:
+            break
+        offset += 100
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "\n".join(urls)
+        + "\n</urlset>\n"
+    )
+    # Same freshness protocol as the RSS feed: strong ETag over the exact
+    # rendered bytes, 304 on match. The sitemap changes only when skills
+    # publish or update, so a one-hour cache window is honest; the per-IP
+    # budget (60/60s, same as the feed) bounds crawler re-fetch volume.
+    etag = '"' + hashlib.sha256(body.encode("utf-8")).hexdigest() + '"'
+    cache_control = "public, max-age=3600"
+    if _if_none_match_matches(request.headers.get("if-none-match"), etag):
+        return Response(status_code=304,
+                        headers={"ETag": etag,
+                                 "Cache-Control": cache_control})
+    return Response(content=body, media_type="application/xml",
+                    headers={"ETag": etag, "Cache-Control": cache_control})
+
+
+@router.get("/robots.txt")
+async def robots_txt():
+    """Static robots.txt pointing crawlers at the sitemap.
+
+    Pure static bytes, no DB work; a generous per-IP budget (120/60s)
+    keeps pathological re-fetch loops cheap for everyone.
+    """
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        f"Sitemap: {BASE_URL}/sitemap.xml\n"
+    )
+    return Response(content=body, media_type="text/plain",
+                    headers={"Cache-Control": "public, max-age=86400"})

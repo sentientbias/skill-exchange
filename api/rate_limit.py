@@ -36,6 +36,8 @@ Behavior:
     GET  /skills/          -> 120 / 60 s per IP (per-skill pages)
     GET  /                 -> 120 / 60 s per IP (front door, exact match)
     GET  /feed.xml         -> 60 / 60 s per IP
+    GET  /sitemap.xml      -> 60 / 60 s per IP (DB-backed list, same as feed)
+    GET  /robots.txt       -> 120 / 60 s per IP (static bytes)
     GET  /install.sh       -> 30 / 60 s per IP (one-shot download)
     GET  /playbook-mcp.py  -> 30 / 60 s per IP (one-shot download)
     GET  /api/v1/skills/   -> 120 / 60 s per IP (skill detail, versions,
@@ -103,6 +105,11 @@ BUCKETS: dict[tuple[str, str], tuple[int, int]] = {
     ("GET", "/browse"): (120, 60),
     ("GET", "/skills/"): (120, 60),
     ("GET", "/feed.xml"): (60, 60),
+    # Crawler discovery surfaces (added 2026-10-02): the sitemap is one
+    # DB-backed list query per request, so it gets the same 60/60s budget
+    # as the feed; robots.txt is static bytes, so a generous 120/60s.
+    ("GET", "/sitemap.xml"): (60, 60),
+    ("GET", "/robots.txt"): (120, 60),
     ("GET", "/install.sh"): (30, 60),
     ("GET", "/playbook-mcp.py"): (30, 60),
     # Anonymous API GETs (the per-slug reads, raw markdown readers, and

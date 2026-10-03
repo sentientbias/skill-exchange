@@ -158,7 +158,11 @@ the human review process.
   pages, public JSON reads, and downloads. Authenticated API reads
   (bearer-key gated) remain deliberately unbudgeted; the per-IP middleware
   cannot distinguish them from public reads, but the budgets are human-
-  speed, so no legitimate client notices.
+  speed, so no legitimate client notices. Since 2026-10-02 the crawler
+  discovery surfaces are covered too: `GET /sitemap.xml` (one DB-backed
+  list query per request) carries the feed's 60 / 60 s budget and
+  `GET /robots.txt` (static bytes) carries 120 / 60 s, both with the same
+  ETag/304 freshness protocol as the feed.
   Honest limit: an adversary with many real egress IPs can still spread writes
   across buckets, and shared-NAT clients share one budget; download counts
   remain client self-reported, which is why the residual-risk note below now
