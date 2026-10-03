@@ -11,7 +11,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               Response)
 from fastapi.staticfiles import StaticFiles
 
 from core import db, store
@@ -27,8 +28,10 @@ from .query_guard import RejectUnknownQueryParamsMiddleware
 from .rate_limit import RateLimitMiddleware
 from .request_size_guard import RequestSizeGuardMiddleware
 from .security_headers import SecurityHeadersMiddleware
-from .routers import accounts, bundles, feed, moderation, publish, ratings, skills
+from .routers import accounts, bundles, feed, moderation, publish, purchases, ratings, skills
+from .routers.skills import _if_none_match_matches
 
+import hashlib
 import logging
 import os
 
@@ -254,8 +257,54 @@ async def skill_detail(slug: str, pool=Depends(get_db)):
     return HTMLResponse(skill_page_html(skill))
 
 
-@app.get("/install.sh", include_in_schema=False)
-async def install_sh():
+# The bootstrap scripts change only on deploy, so a short public cache is
+# honest; pollers asking "is there a new installer?" get 304s instead of a
+# full re-download. Same freshness convention as the feed and the "latest"
+# skill.md alias (content-hash ETag, If-None-Match matching).
+_STATIC_BOOTSTRAP_CACHE_CONTROL = "public, max-age=300"
+
+
+def _static_bootstrap_etag(path: str) -> str:
+    with open(path, "rb") as f:
+        return '"' + hashlib.sha256(f.read()).hexdigest() + '"'
+
+
+async def _serve_static_bootstrap(request: Request, path: str,
+                                  filename: str):
+    """Serve install.sh / playbook-mcp.py with ETag + 304 support.
+
+    No page, copy, API shape, or Pro-tier change: identical bytes, only
+    added cache metadata.
+    """
+    if not os.path.isfile(path):
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            f"{filename} not found")
+    etag = _static_bootstrap_etag(path)
+    if _if_none_match_matches(request.headers.get("if-none-match"), etag):
+        # The client already holds these exact bytes: send 304 with the
+        # same cache metadata, no body.
+        return Response(status_code=304,
+                        headers={"ETag": etag,
+                                 "Cache-Control": _STATIC_BOOTSTRAP_CACHE_CONTROL})
+    # HEAD freshness probes ride the same handler: FileResponse emits the
+    # headers with no body for HEAD.
+    if request.method == "HEAD":
+        return Response(headers={"ETag": etag,
+                                 "Content-Type": "text/plain; charset=utf-8",
+                                 "Cache-Control": _STATIC_BOOTSTRAP_CACHE_CONTROL})
+    resp = FileResponse(
+        path,
+        media_type="text/plain; charset=utf-8",
+        filename=filename,
+    )
+    resp.headers["ETag"] = etag
+    resp.headers["Cache-Control"] = _STATIC_BOOTSTRAP_CACHE_CONTROL
+    return resp
+
+
+@app.api_route("/install.sh", methods=["GET", "HEAD"],
+                 include_in_schema=False)
+async def install_sh(request: Request):
     """The verified installer, one curl away.
 
     Downloads the skill, verifies the Ed25519 signature client-side, and
@@ -263,32 +312,22 @@ async def install_sh():
     signature is bad. Usage: curl -sSf <api>/install.sh -o install.sh
     && chmod +x install.sh && ./install.sh <slug> [version] [dest-dir]
     """
-    path = os.path.join(_REPO_ROOT, "install.sh")
-    if not os.path.isfile(path):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "installer not found")
-    return FileResponse(
-        path,
-        media_type="text/plain; charset=utf-8",
-        filename="install.sh",
-    )
+    return await _serve_static_bootstrap(
+        request, os.path.join(_REPO_ROOT, "install.sh"), "install.sh")
 
 
-@app.get("/playbook-mcp.py", include_in_schema=False)
-async def playbook_mcp():
+@app.api_route("/playbook-mcp.py", methods=["GET", "HEAD"],
+                 include_in_schema=False)
+async def playbook_mcp(request: Request):
     """The public MCP server as a single downloadable script.
 
     Talks only to the public REST API (no DATABASE_URL needed) — search,
     fetch, verified-install, what's-new, and stats tools for any MCP
     client. Requires `pip install "mcp" pynacl` on the agent's machine.
     """
-    path = os.path.join(_REPO_ROOT, "mcp_server", "public_server.py")
-    if not os.path.isfile(path):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "mcp server not found")
-    return FileResponse(
-        path,
-        media_type="text/plain; charset=utf-8",
-        filename="playbook-mcp.py",
-    )
+    return await _serve_static_bootstrap(
+        request, os.path.join(_REPO_ROOT, "mcp_server", "public_server.py"),
+        "playbook-mcp.py")
 
 
 app.include_router(feed.router)
@@ -298,3 +337,4 @@ app.include_router(publish.router, prefix="/api/v1")
 app.include_router(ratings.router, prefix="/api/v1")
 app.include_router(accounts.router, prefix="/api/v1")
 app.include_router(moderation.router, prefix="/api/v1")
+app.include_router(purchases.router, prefix="/api/v1")
