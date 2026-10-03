@@ -127,3 +127,39 @@ def test_tampered_signature_still_fails_closed(tmp_path):
     assert "SIGNATURE VERIFICATION FAILED" in err
     assert list((tmp_path / "dest").iterdir()) == [] if (
         tmp_path / "dest").exists() else True
+
+
+def test_install_dir_uses_canonical_slug_not_raw_argv(tmp_path):
+    """The install directory follows the response's canonical slug.
+
+    The shell normalizes case (`tr A-Z a-z`) but NOT whitespace, while the
+    server's read paths do strip + lowercase. Before this fix the directory
+    came from the raw argv slug, so an argv like "test-skill " (trailing
+    space) verified the signature over the canonical "test-skill" but wrote
+    into a "test-skill /" directory -- the signed identity and the install
+    location disagreed, and the same skill could land in two directories.
+    Now the destination directory always uses the canonical slug the
+    signature binds, matching the signature's canonical-bytes rule.
+    """
+    payload = _signed_payload(SLUG_CANON)
+    rc, out, err = _run_verify_block(tmp_path, payload, argv_slug="test-skill ")
+    assert rc == 0, f"expected success, stderr: {err}"
+    assert "VERIFIED_OK" in out
+    canon_dir = tmp_path / "dest" / SLUG_CANON
+    assert (canon_dir / "SKILL.md").read_text(encoding="utf-8") == SKILL_MD
+    # The raw-argv directory (with the trailing space) must not exist.
+    assert not (tmp_path / "dest" / "test-skill ").exists(), (
+        "install used the raw argv slug for the destination directory"
+    )
+
+
+def test_install_dir_fallback_without_response_slug(tmp_path):
+    """Without a response `slug` field, the directory falls back to the
+    bash-normalized argv slug -- the same fallback the signature check
+    uses, so the two can never disagree."""
+    payload = _signed_payload(SLUG_CANON, include_slug_field=False)
+    rc, out, err = _run_verify_block(tmp_path, payload, argv_slug="Test-Skill")
+    assert rc == 0, f"expected success, stderr: {err}"
+    assert "VERIFIED_OK" in out
+    assert (tmp_path / "dest" / SLUG_CANON / "SKILL.md").read_text(
+        encoding="utf-8") == SKILL_MD

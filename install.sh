@@ -101,10 +101,15 @@ if not (skill_md and signature and pubkey and version):
           "version -- refusing to install", file=sys.stderr)
     sys.exit(3)
 
-# Use the response's canonical slug for the signature's canonical bytes,
-# not whatever case the caller typed: the server normalizes slugs on read
-# paths, and its signatures bind the canonical (lowercase) form. Fall back
-# to the argv slug for payloads that predate the field.
+# Use the response's canonical slug for the signature's canonical bytes
+# AND for the install directory, not whatever case the caller typed: the
+# server normalizes slugs on read paths, and its signatures bind the
+# canonical (lowercase) form. Fall back to the argv slug for payloads that
+# predate the field. The directory must follow the same canonical name --
+# otherwise a mixed-case (or whitespace-padded) argv would verify over
+# "test-skill" but write into "Test-Skill/" or "test-skill /", so the same
+# signed skill could land in two directories and update loops keyed on the
+# registry slug would miss it.
 canon_slug = ver.get("slug") or slug
 canonical = f"{canon_slug}\n{version}\n{skill_md}".encode("utf-8")
 try:
@@ -116,7 +121,7 @@ except (BadSignatureError, ValueError, binascii.Error):
           file=sys.stderr)
     sys.exit(4)
 
-skill_dir = os.path.join(os.path.expanduser(dest), slug)
+skill_dir = os.path.join(os.path.expanduser(dest), canon_slug)
 os.makedirs(skill_dir, exist_ok=True)
 md_path = os.path.join(skill_dir, "SKILL.md")
 with open(md_path, "w", encoding="utf-8") as fh:
